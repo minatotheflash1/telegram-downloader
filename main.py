@@ -12,7 +12,6 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteg
 from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# Server info-r jonno psutil
 try:
     import psutil
 except ImportError:
@@ -33,7 +32,7 @@ if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
 bot = telebot.TeleBot(BOT_TOKEN)
 url_storage = {}
 cooldown = {}
-MAINTENANCE = False
+MAINTENANCE = False # Global maintenance flag
 
 # --- DATABASE SETUP ---
 Base = declarative_base()
@@ -56,8 +55,6 @@ class RedeemCode(Base):
     value = Column(Integer)
     is_used = Column(Boolean, default=False)
 
-# ⚠️⚠️⚠️ DATABASE RESET MAGIC LINE ⚠️⚠️⚠️
-# Nicher line-ta jiboneo delete korben na
 Base.metadata.create_all(engine)
 
 def get_user(db, user_id):
@@ -104,7 +101,6 @@ def get_inline_menu(msg_id):
     markup.row(InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
     return markup
 
-# --- ANIMATION MAKER ---
 def loading_animation(chat_id, msg_id, text):
     stages = [
         "[■□□□□□□□□□] 10%",
@@ -120,9 +116,12 @@ def loading_animation(chat_id, msg_id, text):
             time.sleep(0.5)
         except: pass
 
-# --- HANDLERS ---
+# --- USER COMMANDS ---
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
+    if MAINTENANCE and message.from_user.id != ADMIN_ID:
+        return bot.reply_to(message, "🛠 **Bot under maintenance.**\nServer update cholche, doya kore ektu por try korun.", parse_mode="Markdown")
+
     db = SessionLocal()
     user = get_user(db, message.from_user.id)
     db.close()
@@ -131,8 +130,27 @@ def start_cmd(message):
     text = f"🚀 **Welcome to AURA Premium V2** 🚀\n\nDrop any video link to start downloading instantly.\n\n💰 Credits: `{user.credits}`"
     bot.send_photo(message.chat.id, img_url, caption=text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown")
 
+@bot.message_handler(commands=['feedback'])
+def feedback_cmd(message):
+    if MAINTENANCE and message.from_user.id != ADMIN_ID:
+        return bot.reply_to(message, "🛠 **Bot under maintenance.**", parse_mode="Markdown")
+
+    msg_text = message.text.replace('/feedback', '').strip()
+    if not msg_text:
+        return bot.reply_to(message, "⚠️ Eivabe likhun: `/feedback Amar ei problem hochche...`", parse_mode="Markdown")
+    
+    feedback_msg = f"📩 **New Feedback!**\n\n👤 **User ID:** `{message.from_user.id}`\n🗣 **Name:** {message.from_user.first_name}\n\n📝 **Message:** {msg_text}"
+    try:
+        bot.send_message(ADMIN_ID, feedback_msg, parse_mode="Markdown")
+        bot.reply_to(message, "✅ Apnar feedback successfully Admin er kache pathano hoyeche! Dhonnobad.")
+    except Exception as e:
+        bot.reply_to(message, "❌ Admin ke message pathate somoshsha hochche.")
+
 @bot.message_handler(func=lambda m: m.text in ["👤 Profile", "🎁 Daily Bonus", "🏆 Leaderboard", "ℹ️ Help & Rules"])
 def bottom_menu_handler(message):
+    if MAINTENANCE and message.from_user.id != ADMIN_ID:
+        return bot.reply_to(message, "🛠 **Bot under maintenance.**", parse_mode="Markdown")
+
     db = SessionLocal()
     user = get_user(db, message.from_user.id)
     
@@ -157,12 +175,13 @@ def bottom_menu_handler(message):
         bot.reply_to(message, text, parse_mode="Markdown")
         
     elif message.text == "ℹ️ Help & Rules":
-        text = "🛠 **Commands & Rules:**\n- `/transfer ID AMOUNT` - Send credits to friend.\n- `/redeem CODE` - Add credits.\n- Max 50MB per video.\n- Any bug? Contact admin."
+        text = "🛠 **Commands & Rules:**\n- `/transfer ID AMOUNT` - Send credits.\n- `/redeem CODE` - Add credits.\n- `/feedback MESSAGE` - Send msg to Admin.\n- Max 50MB per video."
         bot.reply_to(message, text, parse_mode="Markdown")
     db.close()
 
 @bot.message_handler(commands=['transfer'])
 def transfer_credits(message):
+    if MAINTENANCE and message.from_user.id != ADMIN_ID: return
     parts = message.text.split()
     if len(parts) != 3: return bot.reply_to(message, "Use: `/transfer 12345678 50`", parse_mode="Markdown")
     
@@ -190,6 +209,42 @@ def transfer_credits(message):
         bot.send_message(target_id, f"🎁 You received {amount} credits from `{message.from_user.id}`!", parse_mode="Markdown")
     except:
         bot.reply_to(message, "❌ Invalid format.")
+
+# --- ADMIN COMMANDS ---
+@bot.message_handler(commands=['maintenance', 'offmaintenance'])
+def toggle_maintenance(message):
+    if message.from_user.id != ADMIN_ID: return
+    global MAINTENANCE
+    
+    cmd = message.text.split()[0].replace('/', '')
+    if cmd == 'maintenance':
+        MAINTENANCE = True
+        bot.reply_to(message, "🛠 **Maintenance Mode is ON.**\nUser-ra ekhon bot bebohar korte parbe na.", parse_mode="Markdown")
+    else:
+        MAINTENANCE = False
+        bot.reply_to(message, "✅ **Maintenance Mode is OFF.**\nBot is live for everyone.", parse_mode="Markdown")
+
+@bot.message_handler(commands=['broadcast'])
+def broadcast_cmd(message):
+    if message.from_user.id != ADMIN_ID: return
+    msg_text = message.text.replace('/broadcast', '').strip()
+    
+    if not msg_text:
+        return bot.reply_to(message, "⚠️ Eivabe likhun: `/broadcast Hello everyone!`", parse_mode="Markdown")
+    
+    db = SessionLocal()
+    users = db.query(User).all()
+    bot.reply_to(message, f"📢 Broadcasting message to {len(users)} users. Please wait...")
+    
+    success_count = 0
+    for u in users:
+        try:
+            bot.send_message(u.id, f"📢 **AURA Update:**\n\n{msg_text}", parse_mode="Markdown")
+            success_count += 1
+            time.sleep(0.05) # Anti-spam delay
+        except: pass
+    db.close()
+    bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success_count} active users.")
 
 @bot.message_handler(commands=['sysinfo'])
 def sys_info(message):
@@ -219,7 +274,8 @@ def admin_commands(message):
         elif cmd == 'stats':
             users = db.query(User).count()
             dls = sum([u.total_downloads for u in db.query(User).all()])
-            bot.reply_to(message, f"📊 **Stats:**\nUsers: {users}\nTotal Downloads: {dls}")
+            m_status = "ON 🛠" if MAINTENANCE else "OFF ✅"
+            bot.reply_to(message, f"📊 **Stats:**\nUsers: {users}\nTotal Downloads: {dls}\nMaintenance: {m_status}")
             
         elif cmd == 'vip' and len(parts) == 2:
             u = get_user(db, int(parts[1]))
@@ -241,6 +297,7 @@ def admin_commands(message):
 
 @bot.message_handler(commands=['redeem'])
 def redeem_cmd(message):
+    if MAINTENANCE and message.from_user.id != ADMIN_ID: return
     parts = message.text.split()
     if len(parts) < 2: return bot.reply_to(message, "Use: `/redeem AURA-CODE`")
     
@@ -257,10 +314,11 @@ def redeem_cmd(message):
         bot.reply_to(message, "❌ Invalid or Expired Code.")
     db.close()
 
+# --- LINK PROCESSOR ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
     if MAINTENANCE and message.from_user.id != ADMIN_ID:
-        return bot.reply_to(message, "🛠 **Maintenance Mode ON**\nServer upgrading, please wait!")
+        return bot.reply_to(message, "🛠 **Bot under maintenance.**\nServer update cholche, doya kore ektu por try korun.", parse_mode="Markdown")
 
     url = message.text.strip()
     msg_id = message.message_id
