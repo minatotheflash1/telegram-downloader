@@ -1,5 +1,4 @@
-pyrogram
-tgcrypto
+pyTelegramBotAPI
 sqlalchemy
 psycopg2-binary
 yt-dlp
