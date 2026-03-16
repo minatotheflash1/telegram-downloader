@@ -14,13 +14,16 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIG ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "8037371175")) # Apnar notun Admin ID
+ADMIN_ID = int(os.getenv("ADMIN_ID", "8037371175"))
 
 if not BOT_TOKEN:
     logger.error("BOT_TOKEN is missing! Railway Variables check korun.")
     exit()
 
 bot = telebot.TeleBot(BOT_TOKEN)
+
+# Telegram 64-byte limit bypass korar jonno temporary storage
+url_storage = {}
 
 # --- DATABASE LOGIC ---
 def get_user(user_id):
@@ -56,16 +59,29 @@ def start_cmd(message):
     if user:
         bot.reply_to(message, f"👋 **Hello Ononto!**\n\nCredit: `{user.credits}`\nJust link pathan download korar jonno.", parse_mode="Markdown")
 
-@bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+# Ekhane regex er bodole simple HTTP check kora hoyeche jate kono link miss na jay
+@bot.message_handler(func=lambda m: m.text and ('http://' in m.text or 'https://' in m.text))
 def link_handler(message):
-    url = message.text
+    url = message.text.strip()
+    msg_id = message.message_id
+    
+    # Link ta storage e save korlam
+    url_storage[msg_id] = url
+    
     btn = InlineKeyboardMarkup()
-    btn.add(InlineKeyboardButton("Download Video (10 Credits)", callback_data=f"dl|{url}"))
+    # Button e sudhu message ID pathacchi jate 64 byte cross na kore
+    btn.add(InlineKeyboardButton("Download Video (10 Credits)", callback_data=f"dl|{msg_id}"))
     bot.reply_to(message, "⚡ Select action:", reply_markup=btn)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('dl|'))
 def download_logic(call):
-    url = call.data.split('|', 1)[1]
+    msg_id = int(call.data.split('|')[1])
+    url = url_storage.get(msg_id)
+    
+    if not url:
+        bot.answer_callback_query(call.id, "❌ Link expired! Please link ta abar send korun.", show_alert=True)
+        return
+
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     
@@ -119,6 +135,10 @@ def download_logic(call):
                     bot.send_video(chat_id, video, caption=f"✅ Enjoy! Credits Left: {user.credits}")
                 
                 os.remove(path)
+                
+                # Kaaj sheshe storage theke link delete kore dibe jate memory free thake
+                if msg_id in url_storage:
+                    del url_storage[msg_id]
                 
     except Exception as e:
         error_msg = str(e).lower()
