@@ -11,12 +11,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- CONFIG (NO API_ID REQUIRED) ---
+# --- CONFIG ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "6198703244"))
 
 if not BOT_TOKEN:
-    logger.error("BOT_TOKEN is missing! Railway Variables e check korun.")
+    logger.error("BOT_TOKEN is missing!")
     exit()
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -40,7 +40,6 @@ def reset_daily_credits():
     try:
         db.query(User).update({User.credits: 100})
         db.commit()
-        logger.info("Daily credits reset successfully.")
     finally:
         db.close()
 
@@ -75,17 +74,15 @@ def download_logic(call):
         db.close()
         return
 
-    user.credits -= 10
-    db.commit()
-    db.close()
-
     bot.edit_message_text("📥 Downloading... Wait koro.", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
+    # yt-dlp config (Mp4 format preference)
     ydl_opts = {
-        'format': 'best',
+        'format': 'best[ext=mp4]/best',
         'outtmpl': f'downloads/%(title)s_{user_id}.%(ext)s',
         'quiet': True,
-        'noplaylist': True
+        'noplaylist': True,
+        'no_warnings': True
     }
 
     try:
@@ -93,14 +90,35 @@ def download_logic(call):
             info = ydl.extract_info(url, download=True)
             path = ydl.prepare_filename(info)
             
-            with open(path, 'rb') as video:
-                bot.send_video(call.message.chat.id, video, caption=f"✅ Enjoy! Credits: {user.credits}")
-            
-            if os.path.exists(path): 
+            # Extension checking
+            if not os.path.exists(path):
+                path = path.rsplit('.', 1)[0] + ".mp4"
+
+            if os.path.exists(path):
+                # 50 MB Limit Check
+                file_size_mb = os.path.getsize(path) / (1024 * 1024)
+                
+                if file_size_mb > 49.5:
+                    bot.send_message(call.message.chat.id, f"❌ Error: Video size ({file_size_mb:.1f} MB) onek boro! Telegram API maximum 50MB support kore. \n\nApnar credit kata hoyni.")
+                    os.remove(path)
+                    db.close()
+                    return
+
+                # Credit kete upload kora
+                user.credits -= 10
+                db.commit()
+
+                with open(path, 'rb') as video:
+                    bot.send_video(call.message.chat.id, video, caption=f"✅ Enjoy! Credits: {user.credits}")
+                
                 os.remove(path)
+                
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Error: Video download kora jacche na.")
+        error_msg = str(e)[:150] # Exact error ta dekhabe
+        bot.send_message(call.message.chat.id, f"❌ Error: {error_msg}...")
         logger.error(f"Download Error: {e}")
+    finally:
+        db.close()
 
 # --- ADMIN SECTION ---
 @bot.message_handler(commands=['gencode'])
@@ -143,5 +161,4 @@ def redeem(message):
 if __name__ == "__main__":
     if not os.path.exists("downloads"): 
         os.makedirs("downloads")
-    logger.info("Bot is starting without API ID/Hash...")
     bot.infinity_polling()
