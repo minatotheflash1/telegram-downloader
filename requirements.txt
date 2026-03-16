@@ -1,0 +1,6 @@
+pyrogram
+tgcrypto
+sqlalchemy
+psycopg2-binary
+yt-dlp
+apscheduler
