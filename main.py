@@ -4,15 +4,20 @@ import string
 import time
 import logging
 import glob
-import psutil # Server info er jonno
 from datetime import datetime
 import yt_dlp
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteger, DateTime
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
+
+# Server info-r jonno psutil
+try:
+    import psutil
+except ImportError:
+    os.system("pip install psutil")
+    import psutil
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,6 +26,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "8037371175"))
 DATABASE_URL = os.getenv("DATABASE_URL")
+
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -29,7 +35,7 @@ url_storage = {}
 cooldown = {}
 MAINTENANCE = False
 
-# --- DATABASE SETUP (Unchanged) ---
+# --- DATABASE SETUP ---
 Base = declarative_base()
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
@@ -50,6 +56,11 @@ class RedeemCode(Base):
     value = Column(Integer)
     is_used = Column(Boolean, default=False)
 
+# ⚠️⚠️⚠️ DATABASE RESET MAGIC LINE ⚠️⚠️⚠️
+# Bot ekbar start howar por nicher line-ta delete ba comment (#) kore diben!
+Base.metadata.drop_all(engine)
+
+# Nicher line-ta jiboneo delete korben na
 Base.metadata.create_all(engine)
 
 def get_user(db, user_id):
@@ -82,7 +93,6 @@ scheduler.start()
 
 # --- UI MENUS ---
 def get_bottom_keyboard():
-    # Persistent Bottom Menu
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
         KeyboardButton("👤 Profile"), KeyboardButton("🎁 Daily Bonus"),
@@ -120,7 +130,6 @@ def start_cmd(message):
     user = get_user(db, message.from_user.id)
     db.close()
     
-    # Premium Welcome Image (Apni eita change korte paren)
     img_url = "https://images.unsplash.com/photo-1611162617474-5b21e879e113?q=80&w=800&auto=format&fit=crop"
     text = f"🚀 **Welcome to AURA Premium V2** 🚀\n\nDrop any video link to start downloading instantly.\n\n💰 Credits: `{user.credits}`"
     bot.send_photo(message.chat.id, img_url, caption=text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown")
@@ -193,6 +202,63 @@ def sys_info(message):
     disk = psutil.disk_usage('/').percent
     text = f"🖥 **Server Status:**\n\n⚙️ CPU Usage: `{cpu}%`\n💽 RAM Usage: `{ram}%`\n💾 Disk Usage: `{disk}%`"
     bot.reply_to(message, text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['gencode', 'stats', 'vip', 'ban'])
+def admin_commands(message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    cmd = message.text.split()[0].replace('/', '')
+    parts = message.text.split()
+    db = SessionLocal()
+    
+    try:
+        if cmd == 'gencode' and len(parts) == 2:
+            val = int(parts[1])
+            code = f"AURA-{''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12))}"
+            db.add(RedeemCode(code=code, value=val))
+            db.commit()
+            bot.reply_to(message, f"🎁 **Code:** `{code}`\nValue: {val}", parse_mode="Markdown")
+            
+        elif cmd == 'stats':
+            users = db.query(User).count()
+            dls = sum([u.total_downloads for u in db.query(User).all()])
+            bot.reply_to(message, f"📊 **Stats:**\nUsers: {users}\nTotal Downloads: {dls}")
+            
+        elif cmd == 'vip' and len(parts) == 2:
+            u = get_user(db, int(parts[1]))
+            u.is_vip = not u.is_vip
+            db.commit()
+            bot.reply_to(message, f"✅ User {parts[1]} VIP: {u.is_vip}")
+            
+        elif cmd == 'ban' and len(parts) == 2:
+            u = get_user(db, int(parts[1]))
+            u.is_banned = not u.is_banned
+            db.commit()
+            status = "Banned" if u.is_banned else "Unbanned"
+            bot.reply_to(message, f"✅ User {parts[1]} is now {status}.")
+            
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {e}")
+    finally:
+        db.close()
+
+@bot.message_handler(commands=['redeem'])
+def redeem_cmd(message):
+    parts = message.text.split()
+    if len(parts) < 2: return bot.reply_to(message, "Use: `/redeem AURA-CODE`")
+    
+    db = SessionLocal()
+    code_in = parts[1].strip()
+    c = db.query(RedeemCode).filter(RedeemCode.code == code_in, RedeemCode.is_used == False).first()
+    if c:
+        u = get_user(db, message.from_user.id)
+        u.credits += c.value
+        c.is_used = True
+        db.commit()
+        bot.reply_to(message, f"✅ Success! {c.value} Credits Added.")
+    else:
+        bot.reply_to(message, "❌ Invalid or Expired Code.")
+    db.close()
 
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
@@ -272,14 +338,7 @@ def process_dl(call):
         db.close()
         if msg_id in url_storage: del url_storage[msg_id]
 
-# Ensure you keep your previous Admin commands (/gencode, /redeem, /stats, /vip, /ban) here 
-# (I kept the core ones intact, you can copy-paste the rest from the previous script if needed).
-
 if __name__ == "__main__":
     if not os.path.exists("downloads"): os.makedirs("downloads")
-    # Notun package add korchi tai ekbar check kore nibe
-    try: import psutil
-    except: os.system("pip install psutil")
-    
     logger.info("AURA Premium Bot Started!")
     bot.infinity_polling()
