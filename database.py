@@ -3,7 +3,6 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteg
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# Railway theke DATABASE_URL automatic nibe
 DATABASE_URL = os.getenv("DATABASE_URL")
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -24,5 +23,4 @@ class RedeemCode(Base):
     value = Column(Integer)
     is_used = Column(Boolean, default=False)
 
-# Table gulo create kora
 Base.metadata.create_all(engine)
