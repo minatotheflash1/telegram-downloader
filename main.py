@@ -1,203 +1,311 @@
 import os
 import secrets
-import yt_dlp
-import logging
 import string
+import time
+import logging
+import glob
+from datetime import datetime
+import yt_dlp
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from database import SessionLocal, User, RedeemCode
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteger, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# Logging Setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- CONFIG ---
+# --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "8037371175"))
 
-if not BOT_TOKEN:
-    logger.error("BOT_TOKEN is missing! Railway Variables check korun.")
-    exit()
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 bot = telebot.TeleBot(BOT_TOKEN)
-
-# Telegram 64-byte limit bypass korar jonno temporary storage
 url_storage = {}
+cooldown = {}
 
-# --- DATABASE LOGIC ---
-def get_user(user_id):
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            user = User(id=user_id, credits=100)
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-        return user
-    finally:
-        db.close()
+# --- DATABASE SETUP ---
+Base = declarative_base()
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
 
+class User(Base):
+    __tablename__ = "users"
+    id = Column(BigInteger, primary_key=True)
+    credits = Column(Integer, default=100)
+    total_downloads = Column(Integer, default=0)
+    is_banned = Column(Boolean, default=False)
+    is_vip = Column(Boolean, default=False)
+    last_daily_claim = Column(DateTime, nullable=True)
+
+class RedeemCode(Base):
+    __tablename__ = "redeem_codes"
+    id = Column(Integer, primary_key=True)
+    code = Column(String, unique=True)
+    value = Column(Integer)
+    is_used = Column(Boolean, default=False)
+
+Base.metadata.create_all(engine)
+
+def get_user(db, user_id):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        user = User(id=user_id, credits=100)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    return user
+
+# --- SCHEDULERS ---
 def reset_daily_credits():
     db = SessionLocal()
     try:
-        db.query(User).update({User.credits: 100})
+        db.query(User).filter(User.is_vip == False).update({User.credits: 100})
         db.commit()
-        logger.info("Daily credits reset complete.")
     finally:
         db.close()
 
+def clean_storage():
+    files = glob.glob('downloads/*')
+    for f in files:
+        if os.path.isfile(f): os.remove(f)
+
 scheduler = BackgroundScheduler()
 scheduler.add_job(reset_daily_credits, 'cron', hour=0, minute=0)
+scheduler.add_job(clean_storage, 'interval', hours=12) 
 scheduler.start()
 
-# --- HANDLERS ---
+# --- MAIN MENU UI ---
+def get_main_menu():
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("👤 My Profile", callback_data="menu_profile"),
+        InlineKeyboardButton("🎁 Daily Bonus", callback_data="menu_daily")
+    )
+    markup.row(
+        InlineKeyboardButton("🏆 Leaderboard", callback_data="menu_leaderboard"),
+        InlineKeyboardButton("ℹ️ Help", callback_data="menu_help")
+    )
+    return markup
+
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    user = get_user(message.from_user.id)
-    if user:
-        bot.reply_to(message, f"👋 **Hello Ononto!**\n\nCredit: `{user.credits}`\nJust link pathan download korar jonno.", parse_mode="Markdown")
+    db = SessionLocal()
+    user = get_user(db, message.from_user.id)
+    
+    # Referral System
+    parts = message.text.split()
+    if len(parts) > 1 and parts[1].startswith('ref_'):
+        ref_id = int(parts[1].split('_')[1])
+        if ref_id != user.id:
+            referrer = db.query(User).filter(User.id == ref_id).first()
+            if referrer:
+                referrer.credits += 50
+                bot.send_message(ref_id, "🎉 Kew apnar invite link diye join koreche! +50 Credits!")
+                db.commit()
+    db.close()
 
-# Ekhane regex er bodole simple HTTP check kora hoyeche jate kono link miss na jay
-@bot.message_handler(func=lambda m: m.text and ('http://' in m.text or 'https://' in m.text))
+    text = (
+        f"⚡ **Welcome to AURA Downloader** ⚡\n\n"
+        f"Apni jekono YouTube, Facebook, TikTok ba Instagram video-r link ekhane send korte paren.\n\n"
+        f"👇 Nicher menu theke apnar account manage korun:"
+    )
+    bot.reply_to(message, text, reply_markup=get_main_menu(), parse_mode="Markdown")
+
+# --- MENU CALLBACKS ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith('menu_'))
+def menu_callbacks(call):
+    action = call.data.split('_')[1]
+    db = SessionLocal()
+    user = get_user(db, call.from_user.id)
+    
+    if action == "profile":
+        status = "VIP 🌟" if user.is_vip else "Regular 👤"
+        text = f"👤 **AURA Profile**\n\n🆔 ID: `{user.id}`\n👑 Status: {status}\n💰 Credits: `{user.credits}`\n📥 Total Downloaded: `{user.total_downloads}`\n\n🔗 Invite link: `https://t.me/{bot.get_me().username}?start=ref_{user.id}`"
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=get_main_menu(), parse_mode="Markdown")
+        
+    elif action == "daily":
+        now = datetime.now()
+        if user.last_daily_claim and (now - user.last_daily_claim).days < 1:
+            bot.answer_callback_query(call.id, "⚠️ Apni ajker daily bonus niye niyechen! Kal try korun.", show_alert=True)
+        else:
+            user.credits += 20
+            user.last_daily_claim = now
+            db.commit()
+            bot.answer_callback_query(call.id, "🎉 +20 Credits Added Successfully!", show_alert=True)
+            bot.edit_message_text(f"🎁 **Daily Bonus Claimed!**\nNew Balance: `{user.credits}`", call.message.chat.id, call.message.message_id, reply_markup=get_main_menu(), parse_mode="Markdown")
+            
+    elif action == "leaderboard":
+        top_users = db.query(User).order_by(User.total_downloads.desc()).limit(5).all()
+        text = "🏆 **Top 5 Downloaders**\n\n"
+        for i, u in enumerate(top_users):
+            text += f"{i+1}. ID: `{u.id}` - 📥 {u.total_downloads} vids\n"
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=get_main_menu(), parse_mode="Markdown")
+        
+    elif action == "help":
+        text = "🛠 **AURA Help Center**\n\n- Ekta video download korle `10 credit` katbe.\n- Audio download korle `5 credit` katbe.\n- Protidin auto `100 credit` paben.\n- Video max `50 MB` hote hobe.\n- Credit nite `/redeem CODE` use korun."
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=get_main_menu(), parse_mode="Markdown")
+        
+    db.close()
+
+@bot.callback_query_handler(func=lambda call: call.data == 'cancel')
+def cancel_action(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+
+# --- DOWNLOAD LOGIC ---
+@bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def link_handler(message):
+    db = SessionLocal()
+    user = get_user(db, message.from_user.id)
+    if user.is_banned:
+        db.close()
+        return bot.reply_to(message, "❌ You are banned from AURA Downloader.")
+    db.close()
+
     url = message.text.strip()
     msg_id = message.message_id
-    
-    # Link ta storage e save korlam
     url_storage[msg_id] = url
     
     btn = InlineKeyboardMarkup()
-    # Button e sudhu message ID pathacchi jate 64 byte cross na kore
-    btn.add(InlineKeyboardButton("Download Video (10 Credits)", callback_data=f"dl|{msg_id}"))
-    bot.reply_to(message, "⚡ Select action:", reply_markup=btn)
+    btn.add(InlineKeyboardButton("🎬 Download Video (10 Cr)", callback_data=f"dl|vid|{msg_id}"))
+    btn.add(InlineKeyboardButton("🎵 Download MP3 (5 Cr)", callback_data=f"dl|aud|{msg_id}"))
+    btn.add(InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
+    
+    bot.reply_to(message, "⚡ **Link Detected!** Ki format e chan?", reply_markup=btn, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('dl|'))
-def download_logic(call):
-    msg_id = int(call.data.split('|')[1])
+def process_download(call):
+    parts = call.data.split('|')
+    dl_type = parts[1]
+    msg_id = int(parts[2])
     url = url_storage.get(msg_id)
     
-    if not url:
-        bot.answer_callback_query(call.id, "❌ Link expired! Please link ta abar send korun.", show_alert=True)
-        return
+    if not url: return bot.answer_callback_query(call.id, "❌ Link expired! Abar send korun.", show_alert=True)
 
     user_id = call.from_user.id
     chat_id = call.message.chat.id
+    cost = 10 if dl_type == 'vid' else 5
     
     db = SessionLocal()
-    user = db.query(User).filter(User.id == user_id).first()
+    user = get_user(db, user_id)
     
-    if not user or user.credits < 10:
-        bot.answer_callback_query(call.id, "Credits shesh! Kal abar reset hobe.", show_alert=True)
+    if not user.is_vip and user.credits < cost:
+        bot.answer_callback_query(call.id, "❌ Credits shesh!", show_alert=True)
         db.close()
         return
 
-    bot.edit_message_text("📥 Downloading... please wait.", chat_id=chat_id, message_id=call.message.message_id)
+    bot.edit_message_text("📥 Extracting data... please wait.", chat_id=chat_id, message_id=call.message.message_id)
 
-    # YT, FB, TikTok - Universal Settings
     ydl_opts = {
-        'format': 'best',
         'outtmpl': f'downloads/%(id)s_{user_id}.%(ext)s',
-        'max_filesize': 50 * 1024 * 1024, # 50 MB limit
-        'socket_timeout': 30,
+        'max_filesize': 50 * 1024 * 1024,
         'quiet': True,
         'noplaylist': True,
-        'no_warnings': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+        'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     }
+    
+    if dl_type == 'vid':
+        ydl_opts['format'] = 'best'
+    else:
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             path = ydl.prepare_filename(info)
-            
-            # Extension check
-            if not os.path.exists(path):
-                path = path.rsplit('.', 1)[0] + ".mp4"
+            if dl_type == 'aud': path = path.rsplit('.', 1)[0] + ".mp3"
+            elif not os.path.exists(path): path = path.rsplit('.', 1)[0] + ".mp4"
 
             if os.path.exists(path):
-                file_size_mb = os.path.getsize(path) / (1024 * 1024)
-                
-                if file_size_mb > 49.5:
-                    bot.send_message(chat_id, f"❌ Error: Video size ({file_size_mb:.1f} MB) onek boro! Telegram maximum 50MB support kore. \n\nApnar credit kata hoyni.")
+                if os.path.getsize(path) / (1024 * 1024) > 49.5:
+                    bot.send_message(chat_id, "❌ Error: Video 50MB er theke boro!")
                     os.remove(path)
-                    db.close()
                     return
 
-                # Download complete hole tobei credit katbe
-                user.credits -= 10
+                if not user.is_vip: user.credits -= cost
+                user.total_downloads += 1
                 db.commit()
 
-                with open(path, 'rb') as video:
-                    bot.send_video(chat_id, video, caption=f"✅ Enjoy! Credits Left: {user.credits}")
+                bot.edit_message_text("🚀 Uploading to Telegram...", chat_id=chat_id, message_id=call.message.message_id)
+                caption = f"✅ Downloaded Successfully!\n⚡ Bot by **AURA MINATO**" 
+                
+                with open(path, 'rb') as file:
+                    if dl_type == 'aud': bot.send_audio(chat_id, file, caption=caption, parse_mode="Markdown")
+                    else: bot.send_video(chat_id, file, caption=caption, parse_mode="Markdown")
                 
                 os.remove(path)
-                
-                # Kaaj sheshe storage theke link delete kore dibe jate memory free thake
-                if msg_id in url_storage:
-                    del url_storage[msg_id]
+                bot.delete_message(chat_id, call.message.message_id)
                 
     except Exception as e:
-        error_msg = str(e).lower()
-        if "max-filesize" in error_msg:
-            bot.send_message(chat_id, "❌ Error: Video 50MB er theke boro! Telegram e pathano somvob na. (Credit kata hoyni)")
-        else:
-            bot.send_message(chat_id, f"❌ Download fail hoyeche. Private video ba invalid link hote pare.")
-            logger.error(f"Download Error: {e}")
+        bot.edit_message_text("❌ Download fail hoyeche. Server block ba link invalid.", chat_id=chat_id, message_id=call.message.message_id)
     finally:
         db.close()
+        if msg_id in url_storage: del url_storage[msg_id]
 
-# --- ADMIN SECTION ---
-@bot.message_handler(commands=['gencode'])
-def generate_code_cmd(message):
-    if message.from_user.id != ADMIN_ID: 
-        bot.reply_to(message, f"❌ Sorry, apni Admin na! (ID: {message.from_user.id})")
-        return
-        
+# --- ADMIN COMMANDS ---
+@bot.message_handler(commands=['gencode', 'stats', 'vip', 'ban'])
+def admin_commands(message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    cmd = message.text.split()[0].replace('/', '')
     parts = message.text.split()
-    if len(parts) < 2: 
-        bot.reply_to(message, "⚠️ Vul format! Eivabe likhun: `/gencode 100`", parse_mode="Markdown")
-        return
+    db = SessionLocal()
     
     try:
-        val = int(parts[1])
-        code = f"AURA-{''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12))}"
-        
-        db = SessionLocal()
-        db.add(RedeemCode(code=code, value=val))
-        db.commit()
+        if cmd == 'gencode' and len(parts) == 2:
+            val = int(parts[1])
+            code = f"AURA-{''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12))}"
+            db.add(RedeemCode(code=code, value=val))
+            db.commit()
+            bot.reply_to(message, f"🎁 **Code:** `{code}`\nValue: {val}", parse_mode="Markdown")
+            
+        elif cmd == 'stats':
+            users = db.query(User).count()
+            dls = sum([u.total_downloads for u in db.query(User).all()])
+            bot.reply_to(message, f"📊 **Stats:**\nUsers: {users}\nTotal Downloads: {dls}")
+            
+        elif cmd == 'vip' and len(parts) == 2:
+            u = get_user(db, int(parts[1]))
+            u.is_vip = not u.is_vip
+            db.commit()
+            bot.reply_to(message, f"✅ User {parts[1]} VIP: {u.is_vip}")
+            
+        elif cmd == 'ban' and len(parts) == 2:
+            u = get_user(db, int(parts[1]))
+            u.is_banned = not u.is_banned
+            db.commit()
+            status = "Banned" if u.is_banned else "Unbanned"
+            bot.reply_to(message, f"✅ User {parts[1]} is now {status}.")
+            
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {e}")
+    finally:
         db.close()
-        
-        bot.reply_to(message, f"🎁 **Code Generated!**\n\nCode: `{code}`\nValue: {val} Credits", parse_mode="Markdown")
-    except ValueError:
-        bot.reply_to(message, "⚠️ Amount oboshshoi number hote hobe. Jemon: `/gencode 50`", parse_mode="Markdown")
 
 @bot.message_handler(commands=['redeem'])
 def redeem_cmd(message):
     parts = message.text.split()
-    if len(parts) < 2: 
-        bot.reply_to(message, "⚠️ Eivabe likhun: `/redeem AURA-XXXXX`", parse_mode="Markdown")
-        return
+    if len(parts) < 2: return bot.reply_to(message, "Use: `/redeem AURA-CODE`")
     
-    code_in = parts[1].strip()
     db = SessionLocal()
+    code_in = parts[1].strip()
     c = db.query(RedeemCode).filter(RedeemCode.code == code_in, RedeemCode.is_used == False).first()
-    
     if c:
-        u = db.query(User).filter(User.id == message.from_user.id).first()
+        u = get_user(db, message.from_user.id)
         u.credits += c.value
         c.is_used = True
         db.commit()
-        bot.reply_to(message, f"✅ Success! Apnar account-e {c.value} Credits add hoyeche.")
+        bot.reply_to(message, f"✅ Success! {c.value} Credits Added.")
     else:
-        bot.reply_to(message, "❌ Invalid ba Expired Code.")
+        bot.reply_to(message, "❌ Invalid or Expired Code.")
     db.close()
 
 if __name__ == "__main__":
-    if not os.path.exists("downloads"): 
-        os.makedirs("downloads")
-    logger.info("Bot started successfully!")
+    if not os.path.exists("downloads"): os.makedirs("downloads")
+    logger.info("AURA Bot Started!")
     bot.infinity_polling()
