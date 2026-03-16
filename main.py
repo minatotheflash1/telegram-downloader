@@ -97,7 +97,7 @@ def get_bottom_keyboard():
 def get_inline_menu(msg_id):
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🎬 Video (10 Cr)", callback_data=f"dl|vid|{msg_id}"),
-               InlineKeyboardButton("🎵 MP3 (5 Cr)", callback_data=f"dl|aud|{msg_id}"))
+               InlineKeyboardButton("🎵 Audio (5 Cr)", callback_data=f"dl|aud|{msg_id}"))
     markup.row(InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
     return markup
 
@@ -241,7 +241,7 @@ def broadcast_cmd(message):
         try:
             bot.send_message(u.id, f"📢 **AURA Update:**\n\n{msg_text}", parse_mode="Markdown")
             success_count += 1
-            time.sleep(0.05) # Anti-spam delay
+            time.sleep(0.05)
         except: pass
     db.close()
     bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success_count} active users.")
@@ -358,18 +358,25 @@ def process_dl(call):
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
         'max_filesize': 50 * 1024 * 1024,
         'quiet': True, 'noplaylist': True,
-        'http_headers': {'User-Agent': 'Mozilla/5.0'}
+        'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     }
     
-    if dl_type == 'vid': ydl_opts['format'] = 'best'
-    else: ydl_opts['format'] = 'bestaudio/best'; ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+    # 🎵 Direct Audio Fix (FFmpeg chara m4a download)
+    if dl_type == 'vid': 
+        ydl_opts['format'] = 'best'
+    else: 
+        ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            path = ydl.prepare_filename(info)
-            if dl_type == 'aud': path = path.rsplit('.', 1)[0] + ".mp3"
-            elif not os.path.exists(path): path = path.rsplit('.', 1)[0] + ".mp4"
+            
+            # File location dynamic bhabe khuje ber kora
+            downloaded_files = glob.glob(f'downloads/{info["id"]}_{user.id}.*')
+            if not downloaded_files:
+                raise Exception("File save hoyni")
+                
+            path = downloaded_files[0]
 
             if os.path.exists(path):
                 if os.path.getsize(path) / (1024 * 1024) > 49.5:
@@ -381,14 +388,19 @@ def process_dl(call):
                 user.total_downloads += 1
                 db.commit()
 
-                bot.edit_message_text("🚀 Uploading...", call.message.chat.id, msg.message_id)
+                bot.edit_message_text("🚀 Uploading to Telegram...", call.message.chat.id, msg.message_id)
                 with open(path, 'rb') as file:
-                    if dl_type == 'aud': bot.send_audio(call.message.chat.id, file, caption="⚡ **AURA Downloader**", parse_mode="Markdown")
-                    else: bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**", parse_mode="Markdown")
+                    if dl_type == 'aud': 
+                        bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA Downloader**", parse_mode="Markdown")
+                    else: 
+                        bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**", parse_mode="Markdown")
+                
                 os.remove(path)
                 bot.delete_message(call.message.chat.id, msg.message_id)
+                
     except Exception as e:
-        bot.edit_message_text("❌ Download failed.", call.message.chat.id, msg.message_id)
+        logger.error(f"DL Error: {e}")
+        bot.edit_message_text("❌ Download failed. Link invalid ba private.", call.message.chat.id, msg.message_id)
     finally:
         db.close()
         if msg_id in url_storage: del url_storage[msg_id]
