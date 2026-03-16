@@ -3,81 +3,75 @@ import secrets
 import yt_dlp
 import logging
 import string
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database import SessionLocal, User, RedeemCode
 from apscheduler.schedulers.background import BackgroundScheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- CONFIGURATION ---
-# Railway Variable na pele ekhane manually apnar gulo likhun (Safe Side)
-API_ID = int(os.getenv("API_ID", "37191396")) # Screenshot-er ID
-API_HASH = os.getenv("API_HASH", "b0bd2eb8161cf5907e83f81c46454799") 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8690383670:AAFfrdz1uD2jfrktnn2zSHelU6rzmzIGvnU")
+# --- CONFIG (NO API_ID REQUIRED) ---
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "6198703244"))
 
-# Download path setup
-DOWNLOAD_DIR = "downloads"
-if not os.path.exists(DOWNLOAD_DIR):
-    os.makedirs(DOWNLOAD_DIR)
+if not BOT_TOKEN:
+    logger.error("BOT_TOKEN is missing! Railway Variables e check korun.")
+    exit()
 
-app = Client(
-    "video_bot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-    in_memory=True # Crash komate session memory te rakhbe
-)
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# --- Database Helpers ---
+# --- DATABASE LOGIC ---
 def get_user(user_id):
     db = SessionLocal()
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        user = User(id=user_id)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    db.close()
-    return user
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            user = User(id=user_id, credits=100)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        return user
+    finally:
+        db.close()
 
 def reset_daily_credits():
     db = SessionLocal()
-    db.query(User).update({User.credits: 100})
-    db.commit()
-    db.close()
-    logger.info("Daily credits reset complete.")
+    try:
+        db.query(User).update({User.credits: 100})
+        db.commit()
+        logger.info("Daily credits reset successfully.")
+    finally:
+        db.close()
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(reset_daily_credits, 'cron', hour=0, minute=0)
 scheduler.start()
 
-# --- Handlers ---
-@app.on_message(filters.command("start"))
-async def start_cmd(client, message):
+# --- HANDLERS ---
+@bot.message_handler(commands=['start'])
+def start_cmd(message):
     user = get_user(message.from_user.id)
-    await message.reply(f"👋 Welcome!\nCredit: **{user.credits}**\nLink pathan download korar jonno.")
+    if user:
+        bot.reply_to(message, f"👋 **Hello!**\n\nCredit: `{user.credits}`\nJust link pathan download korar jonno.", parse_mode="Markdown")
 
-@app.on_message(filters.regex(r'http|https'))
-async def link_handler(client, message):
+@bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+def link_handler(message):
     url = message.text
-    buttons = [
-        [InlineKeyboardButton("Download Video (10 Credits)", callback_data=f"dl|best|{url}")]
-    ]
-    await message.reply("Click niche select korun:", reply_markup=InlineKeyboardMarkup(buttons))
+    btn = InlineKeyboardMarkup()
+    btn.add(InlineKeyboardButton("Download Video (10 Credits)", callback_data=f"dl|{url}"))
+    bot.reply_to(message, "⚡ Select action:", reply_markup=btn)
 
-@app.on_callback_query(filters.regex(r'^dl\|'))
-async def process_download(client, callback):
-    _, quality_pref, url = callback.data.split('|')
-    user_id = callback.from_user.id
+@bot.callback_query_handler(func=lambda call: call.data.startswith('dl|'))
+def download_logic(call):
+    url = call.data.split('|', 1)[1]
+    user_id = call.from_user.id
     
     db = SessionLocal()
     user = db.query(User).filter(User.id == user_id).first()
     
-    if user.credits < 10:
-        await callback.answer("Insufficient Credit!", show_alert=True)
+    if not user or user.credits < 10:
+        bot.answer_callback_query(call.id, "Credits shesh! Kal abar reset hobe.", show_alert=True)
         db.close()
         return
 
@@ -85,65 +79,69 @@ async def process_download(client, callback):
     db.commit()
     db.close()
 
-    await callback.edit_message_text("⚡ Processing... Please wait.")
+    bot.edit_message_text("📥 Downloading... Wait koro.", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
     ydl_opts = {
         'format': 'best',
-        'outtmpl': f'{DOWNLOAD_DIR}/%(title)s_{user_id}.%(ext)s',
+        'outtmpl': f'downloads/%(title)s_{user_id}.%(ext)s',
         'quiet': True,
-        'no_warnings': True,
+        'noplaylist': True
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
+            path = ydl.prepare_filename(info)
             
-            await callback.message.reply_video(
-                video=file_path, 
-                caption=f"✅ Enjoy! Credits left: {user.credits}"
-            )
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                
+            with open(path, 'rb') as video:
+                bot.send_video(call.message.chat.id, video, caption=f"✅ Enjoy! Credits: {user.credits}")
+            
+            if os.path.exists(path): 
+                os.remove(path)
     except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Error: Video download kora jacche na.")
         logger.error(f"Download Error: {e}")
-        await callback.message.reply(f"❌ Error: Video download kora jabena ekhon.")
 
-# --- Admin: /gencode format AURA-XXX ---
-@app.on_message(filters.command("gencode") & filters.user(ADMIN_ID))
-async def generate_aura_code(client, message):
+# --- ADMIN SECTION ---
+@bot.message_handler(commands=['gencode'])
+def gencode(message):
+    if message.from_user.id != ADMIN_ID: return
+    parts = message.text.split()
+    if len(parts) < 2: return
+    
     try:
-        val = int(message.command[1])
-        random_str = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(15))
-        aura_code = f"AURA-{random_str}"
+        val = int(parts[1])
+        code = f"AURA-{''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12))}"
         
         db = SessionLocal()
-        new_code = RedeemCode(code=aura_code, value=val)
-        db.add(new_code)
+        db.add(RedeemCode(code=code, value=val))
         db.commit()
         db.close()
-        
-        await message.reply(f"🎁 Code: `{aura_code}`\nValue: {val}")
-    except:
-        await message.reply("Format: `/gencode 100`")
+        bot.reply_to(message, f"🎁 Code: `{code}`\nValue: {val}", parse_mode="Markdown")
+    except ValueError:
+        bot.reply_to(message, "Format: `/gencode 100`")
 
-@app.on_message(filters.command("redeem"))
-async def redeem_now(client, message):
-    if len(message.command) < 2: return
-    input_code = message.command[1].strip()
-    db = SessionLocal()
-    code_data = db.query(RedeemCode).filter(RedeemCode.code == input_code, RedeemCode.is_used == False).first()
+@bot.message_handler(commands=['redeem'])
+def redeem(message):
+    parts = message.text.split()
+    if len(parts) < 2: return
     
-    if code_data:
-        user = db.query(User).filter(User.id == message.from_user.id).first()
-        user.credits += code_data.value
-        code_data.is_used = True
+    code_in = parts[1].strip()
+    db = SessionLocal()
+    c = db.query(RedeemCode).filter(RedeemCode.code == code_in, RedeemCode.is_used == False).first()
+    
+    if c:
+        u = db.query(User).filter(User.id == message.from_user.id).first()
+        u.credits += c.value
+        c.is_used = True
         db.commit()
-        await message.reply(f"✅ Added {code_data.value} credits.")
+        bot.reply_to(message, f"✅ Success! {c.value} Credits Added.")
     else:
-        await message.reply("❌ Invalid Code.")
+        bot.reply_to(message, "❌ Invalid or Expired Code.")
     db.close()
 
 if __name__ == "__main__":
-    app.run()
+    if not os.path.exists("downloads"): 
+        os.makedirs("downloads")
+    logger.info("Bot is starting without API ID/Hash...")
+    bot.infinity_polling()
