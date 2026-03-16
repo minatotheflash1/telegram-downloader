@@ -57,9 +57,6 @@ class RedeemCode(Base):
     is_used = Column(Boolean, default=False)
 
 # ⚠️⚠️⚠️ DATABASE RESET MAGIC LINE ⚠️⚠️⚠️
-# Bot ekbar start howar por nicher line-ta delete ba comment (#) kore diben!
-Base.metadata.drop_all(engine)
-
 # Nicher line-ta jiboneo delete korben na
 Base.metadata.create_all(engine)
 
