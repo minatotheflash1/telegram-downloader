@@ -121,11 +121,19 @@ def download_logic(call):
         db.close()
 
 # --- ADMIN SECTION ---
+# --- ADMIN SECTION ---
 @bot.message_handler(commands=['gencode'])
-def gencode(message):
-    if message.from_user.id != ADMIN_ID: return
+def generate_code_cmd(message):
+    # Prothomei check korbe apni admin kina
+    if message.from_user.id != ADMIN_ID: 
+        bot.reply_to(message, f"❌ Sorry, apni Admin na! (Apnar ID: {message.from_user.id})")
+        return
+        
     parts = message.text.split()
-    if len(parts) < 2: return
+    # Jodi sudhu /gencode lekhe, tahole warning dibe
+    if len(parts) < 2: 
+        bot.reply_to(message, "⚠️ Vul format! Eivabe likhun: `/gencode 100`", parse_mode="Markdown")
+        return
     
     try:
         val = int(parts[1])
@@ -135,14 +143,17 @@ def gencode(message):
         db.add(RedeemCode(code=code, value=val))
         db.commit()
         db.close()
-        bot.reply_to(message, f"🎁 Code: `{code}`\nValue: {val}", parse_mode="Markdown")
+        
+        bot.reply_to(message, f"🎁 **Code Generated!**\n\nCode: `{code}`\nValue: {val} Credits", parse_mode="Markdown")
     except ValueError:
-        bot.reply_to(message, "Format: `/gencode 100`")
+        bot.reply_to(message, "⚠️ Amount oboshshoi number hote hobe. Jemon: `/gencode 50`", parse_mode="Markdown")
 
 @bot.message_handler(commands=['redeem'])
-def redeem(message):
+def redeem_cmd(message):
     parts = message.text.split()
-    if len(parts) < 2: return
+    if len(parts) < 2: 
+        bot.reply_to(message, "⚠️ Eivabe likhun: `/redeem AURA-XXXXX`", parse_mode="Markdown")
+        return
     
     code_in = parts[1].strip()
     db = SessionLocal()
@@ -153,12 +164,7 @@ def redeem(message):
         u.credits += c.value
         c.is_used = True
         db.commit()
-        bot.reply_to(message, f"✅ Success! {c.value} Credits Added.")
+        bot.reply_to(message, f"✅ Success! Apnar account-e {c.value} Credits add hoyeche.")
     else:
-        bot.reply_to(message, "❌ Invalid or Expired Code.")
+        bot.reply_to(message, "❌ Invalid ba Expired Code.")
     db.close()
-
-if __name__ == "__main__":
-    if not os.path.exists("downloads"): 
-        os.makedirs("downloads")
-    bot.infinity_polling()
