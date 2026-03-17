@@ -5,6 +5,7 @@ import time
 import logging
 import glob
 import csv
+import random
 from io import StringIO
 from datetime import datetime, timedelta
 import yt_dlp
@@ -27,9 +28,12 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = 8651895707 # Main Owner ID
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-# Multi-Channel Force Sub
 FORCE_CHANNELS = [] 
+
+# 🚀 2GB LOCAL SERVER BYPASS
+USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
+if USE_LOCAL_SERVER:
+    telebot.apihelper.API_URL = "http://localhost:8081/bot{0}/{1}"
 
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -64,6 +68,8 @@ class User(Base):
     role_expires_at = Column(DateTime, nullable=True) 
     last_code_used = Column(DateTime, nullable=True) 
     last_daily_claim = Column(DateTime, nullable=True)
+    last_spin = Column(DateTime, nullable=True) # 🎰 Lucky Spin
+    auto_delete = Column(Boolean, default=False) # ⚙️ User Settings
     total_downloads = Column(Integer, default=0)
     is_banned = Column(Boolean, default=False)
     referred_by = Column(BigInteger, nullable=True)
@@ -78,6 +84,7 @@ class RedeemCode(Base):
     expires_at = Column(DateTime, nullable=True) 
     is_used = Column(Boolean, default=False)
 
+# DATABASE SAFETY: Table drop kora bondho, jate data save thake!
 Base.metadata.create_all(engine)
 
 def get_user(db, user_id, user_name="User", referrer_id=None):
@@ -161,7 +168,6 @@ def get_inline_menu(msg_id):
                InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
     return markup
 
-# 🔥 NEW SMART LOADING ANIMATION
 def loading_animation(chat_id, msg_id):
     stages = [
         "⚙️ Preparing request... `[■□□□□□□□□□]`",
@@ -202,22 +208,92 @@ def start_cmd(message):
     text = f"🚀 **Hello {message.from_user.first_name}, Welcome to AURA!**\n\nDrop any video link to start downloading instantly.\n\n👑 **Role:** `{user.role.capitalize()}`\n📥 **Usage:** `{user.daily_downloads} / {LIMITS[user.role]}`\n👥 **Community:** `{total_users} Users`"
     bot.send_message(message.chat.id, text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown")
 
+# ⚙️ SETTINGS MENU
+@bot.message_handler(commands=['settings'])
+def settings_cmd(message):
+    db = SessionLocal()
+    user = get_user(db, message.from_user.id)
+    
+    status = "ON 🟢" if user.auto_delete else "OFF 🔴"
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(f"Auto-Delete Messages: {status}", callback_data=f"set_autodel|{user.id}"))
+    
+    bot.reply_to(message, "⚙️ **User Settings**\nConfigure your AURA experience:", reply_markup=markup, parse_mode="Markdown")
+    db.close()
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('set_autodel'))
+def toggle_auto_delete(call):
+    db = SessionLocal()
+    user_id = int(call.data.split('|')[1])
+    user = get_user(db, user_id)
+    
+    user.auto_delete = not user.auto_delete
+    db.commit()
+    
+    status = "ON 🟢" if user.auto_delete else "OFF 🔴"
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(f"Auto-Delete Messages: {status}", callback_data=f"set_autodel|{user.id}"))
+    
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
+    bot.answer_callback_query(call.id, f"Auto-Delete turned {status.split()[0]}")
+    db.close()
+
+# 🎰 LUCKY SPIN SYSTEM (Limit thekei nibe)
+@bot.message_handler(commands=['spin'])
+def lucky_spin_cmd(message):
+    db = SessionLocal()
+    user = get_user(db, message.from_user.id)
+    
+    # Check if user still has download limits left
+    if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
+        db.close()
+        return bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit ({LIMITS[user.role]}) shesh holei apni Lucky Spin 🎰 khelte parben.", parse_mode="Markdown")
+
+    if user.last_spin and user.last_spin.date() == datetime.now().date():
+        db.close()
+        return bot.reply_to(message, "⚠️ Apni ajke already Spin korechen! Kal abar try korun.")
+        
+    user.last_spin = datetime.now()
+    bot.reply_to(message, "🎰 **Spinning the wheel...**")
+    time.sleep(1.5)
+    
+    chance = random.randint(1, 100)
+    
+    if chance <= 10: # 10% Chance
+        user.role = 'silver'
+        user.role_expires_at = datetime.now() + timedelta(hours=1)
+        user.daily_downloads = 0
+        result = "🎉 **JACKPOT!** Apni peyechen **1 Hour Silver Plan**! Enjoy unlimited fast downloads for 1 hr."
+    elif chance <= 30: # 20% Chance
+        user.daily_downloads = max(0, user.daily_downloads - 3)
+        result = "🎁 **Awesome!** Apni peyechen **+3 Extra Downloads** ajker jonno!"
+    elif chance <= 60: # 30% Chance
+        user.daily_downloads = max(0, user.daily_downloads - 1)
+        result = "🎁 **Good!** Apni peyechen **+1 Extra Download** ajker jonno!"
+    else: # 40% Chance
+        result = "💔 **Better luck next time!** Ajke kichu jiten ni. Kalke abar try korun!"
+        
+    db.commit()
+    db.close()
+    bot.send_message(message.chat.id, result, parse_mode="Markdown")
+
 @bot.message_handler(func=lambda m: m.text in ["👤 Profile", "💎 Get Subscriptions", "🏆 Leaderboard", "🎁 Invite & Earn", "🎁 Daily Claim", "ℹ️ Help & Rules"])
 def bottom_menu_handler(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID: return
     db = SessionLocal()
     user = get_user(db, message.from_user.id, message.from_user.first_name)
+    
     if user.is_banned:
         db.close()
         return
     
     if message.text == "👤 Profile":
         expiry = user.role_expires_at.strftime("%Y-%m-%d %H:%M") if user.role_expires_at else "Lifetime"
-        text = f"👤 **AURA Profile**\n\n🆔 ID: `{user.id}`\n👑 Role: `{user.role.capitalize()}`\n⏳ Expiry: `{expiry}`\n📊 **Usage:** `{user.daily_downloads} / {LIMITS[user.role]}`\n📥 **Total:** `{user.total_downloads}`\n👥 **Invites:** `{user.referral_count}`"
+        text = f"👤 **AURA Profile**\n\n🆔 ID: `{user.id}`\n👑 Role: `{user.role.capitalize()}`\n⏳ Expiry: `{expiry}`\n📊 **Usage:** `{user.daily_downloads} / {LIMITS[user.role]}`\n📥 **Total:** `{user.total_downloads}`\n👥 **Invites:** `{user.referral_count}`\n🎰 **Try /spin when limit is over!**"
         bot.reply_to(message, text, parse_mode="Markdown")
         
     elif message.text == "💎 Get Subscriptions":
-        text = f"💎 **AURA PREMIUM SUBSCRIPTIONS** 💎\n\n🥈 **Silver:** 20 DL/Day ➡️ **{PRICING['silver']}**\n🥇 **Gold:** 50 DL/Day ➡️ **{PRICING['gold']}**\n💎 **Diamond:** 100 DL/Day ➡️ **{PRICING['diamond']}**\n\n💳 **Bkash/Nagad:** `01846849460` (Send Money)\n\n⚠️ Payment korar por nicher button theke verify korun:"
+        text = f"💎 **AURA PREMIUM SUBSCRIPTIONS** 💎\n\n🥈 **Silver:** 20 DL/Day ➡️ **{PRICING['silver']}**\n🥇 **Gold:** 50 DL/Day ➡️ **{PRICING['gold']}**\n💎 **Diamond (2GB Big File):** 100 DL/Day ➡️ **{PRICING['diamond']}**\n\n💳 **Bkash/Nagad:** `01846849460` (Send Money)\n\n⚠️ Payment korar por nicher button theke verify korun:"
         markup = InlineKeyboardMarkup().add(InlineKeyboardButton("✅ Verify Payment", callback_data="verify_payment"))
         bot.reply_to(message, text, reply_markup=markup, parse_mode="Markdown")
             
@@ -234,7 +310,10 @@ def bottom_menu_handler(message):
         bot.reply_to(message, text, parse_mode="Markdown")
 
     elif message.text == "🎁 Daily Claim":
-        if user.last_daily_claim and user.last_daily_claim.date() == datetime.now().date():
+        # Check limit for daily claim
+        if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
+            bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit ({LIMITS[user.role]}) shesh holei apni Daily Claim bebohar korte parben.", parse_mode="Markdown")
+        elif user.last_daily_claim and user.last_daily_claim.date() == datetime.now().date():
             bot.reply_to(message, "⚠️ Ajker daily claim apni already niye niyechhen! Kal abar ashben.")
         else:
             user.daily_downloads = max(0, user.daily_downloads - 2)
@@ -243,7 +322,7 @@ def bottom_menu_handler(message):
             bot.reply_to(message, "🎉 **+2 Extra Downloads Added!**\nEnjoy your daily bonus.", parse_mode="Markdown")
 
     elif message.text == "ℹ️ Help & Rules":
-        text = "🛠 **Commands & Rules:**\n- `/redeem CODE` - Upgrade plan.\n- `/feedback MSG` - Send msg to Admin.\n- Free users get 5 DL/Day.\n- Max 50MB per video."
+        text = "🛠 **Commands & Rules:**\n- `/redeem CODE` - Upgrade plan.\n- `/spin` - Lucky draw (Limit shesh hole).\n- `/settings` - Customization.\n- `/feedback MSG` - Send msg to Admin.\n- Free users get 5 DL/Day.\n- Max 50MB per video (2GB for Diamond/Owner)."
         bot.reply_to(message, text, parse_mode="Markdown")
         
     db.close()
@@ -268,10 +347,7 @@ def process_payment_trxid(message, file_id):
     name = message.from_user.first_name
 
     markup = InlineKeyboardMarkup()
-    markup.row(
-        InlineKeyboardButton("Approve 🥈 Silver", callback_data=f"apv|silver|{user_id}"),
-        InlineKeyboardButton("Approve 🥇 Gold", callback_data=f"apv|gold|{user_id}")
-    )
+    markup.row(InlineKeyboardButton("Approve 🥈 Silver", callback_data=f"apv|silver|{user_id}"), InlineKeyboardButton("Approve 🥇 Gold", callback_data=f"apv|gold|{user_id}"))
     markup.row(InlineKeyboardButton("Approve 💎 Diamond", callback_data=f"apv|diamond|{user_id}"))
     markup.row(InlineKeyboardButton("❌ Reject Payment", callback_data=f"apv|reject|{user_id}"))
 
@@ -333,6 +409,8 @@ _Example: /gencode10 silver 24_
 `/start` - Start bot
 `/redeem [Code]` - Use code
 `/feedback [Msg]` - Message Admin
+`/spin` - Lucky Spin
+`/settings` - User settings
 """
     bot.reply_to(message, text, parse_mode="Markdown")
 
@@ -639,7 +717,7 @@ def handle_link(message):
             f"💎 **GET SUBSCRIPTIONS:**\n"
             f"🥈 Silver (20 DL) - **{PRICING['silver']}**\n"
             f"🥇 Gold (50 DL) - **{PRICING['gold']}**\n"
-            f"💎 Diamond (100 DL) - **{PRICING['diamond']}**\n\n"
+            f"💎 Diamond (100 DL / 2GB File) - **{PRICING['diamond']}**\n\n"
             f"Nicher **'💎 Get Subscriptions'** button a click kore payment korun, naki kalke abar try korun!"
         )
         return bot.reply_to(message, limit_msg, parse_mode="Markdown")
@@ -654,6 +732,7 @@ def handle_link(message):
     elif "facebook.com" in url or "fb.watch" in url: platform = "Facebook"
     elif "tiktok.com" in url: platform = "TikTok"
     elif "instagram.com" in url: platform = "Instagram"
+    elif "spotify.com" in url: platform = "Spotify"
 
     bot.reply_to(message, f"🔗 **{platform} Link Analyzed!**\nChoose format:", reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
 
@@ -679,7 +758,6 @@ def process_dl(call):
 
     msg = bot.edit_message_text("⏳ Processing request...", call.message.chat.id, call.message.message_id)
     
-    # 🔥 LIVE ANIMATION CALL
     loading_animation(call.message.chat.id, msg.message_id)
 
     if user.role != 'owner': 
@@ -687,9 +765,13 @@ def process_dl(call):
     user.total_downloads += 1
     db.commit()
 
+    max_size = 50 * 1024 * 1024 
+    if user.role in ['diamond', 'owner']:
+        max_size = 2000 * 1024 * 1024 
+
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
-        'max_filesize': 50 * 1024 * 1024,
+        'max_filesize': max_size,
         'quiet': True, 'noplaylist': True,
         'http_headers': {'User-Agent': 'Mozilla/5.0'}
     }
@@ -699,7 +781,6 @@ def process_dl(call):
     elif dl_type == 'thumb': ydl_opts['skip_download'] = True; ydl_opts['writethumbnail'] = True
 
     try:
-        # Message update to Uploading...
         bot.edit_message_text("🚀 **Uploading to Telegram...**\nDoya kore ektu opekha korun.", call.message.chat.id, msg.message_id, parse_mode="Markdown")
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -717,8 +798,10 @@ def process_dl(call):
             path = downloaded_files[0]
 
             if os.path.exists(path):
-                if os.path.getsize(path) / (1024 * 1024) > 49.5:
-                    raise Exception("File too large")
+                file_size = os.path.getsize(path) / (1024 * 1024)
+                
+                if file_size > 49.5 and not USE_LOCAL_SERVER:
+                    raise Exception("File too large for Public API. Needs Local Server.")
 
                 bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
                 with open(path, 'rb') as file:
@@ -728,13 +811,22 @@ def process_dl(call):
                 os.remove(path)
                 bot.delete_message(call.message.chat.id, msg.message_id)
                 
+                if user.auto_delete:
+                    try: bot.delete_message(call.message.chat.id, call.message.reply_to_message.message_id)
+                    except: pass
+                
     except Exception as e:
         logger.error(f"DL Error: {e}")
         if user.role != 'owner' and user.daily_downloads > 0:
             user.daily_downloads -= 1
         user.total_downloads -= 1
         db.commit()
-        bot.edit_message_text("❌ Download failed or file too large. Apnar limit refund deya hoyeche!", call.message.chat.id, msg.message_id)
+        
+        error_msg = "❌ Download failed or file too large."
+        if "Local Server" in str(e):
+            error_msg = "❌ File ti 50MB er boro! (Admin ke Local API On korte bolun)."
+            
+        bot.edit_message_text(f"{error_msg} Apnar limit refund deya hoyeche!", call.message.chat.id, msg.message_id)
     finally:
         db.close()
         if msg_id in url_storage: del url_storage[msg_id]
