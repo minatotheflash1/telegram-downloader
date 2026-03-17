@@ -10,7 +10,7 @@ from io import StringIO
 from datetime import datetime, timedelta
 import yt_dlp
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteger, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -53,6 +53,8 @@ LIMITS = {
 }
 
 PRICING = {'silver': '10 TK', 'gold': '50 TK', 'diamond': '100 TK'}
+
+UNAUTH_MSG = "🚫 **UNAUTHORIZED:** Sudhumatro Owner ei command ti bebohar korte parbe!"
 
 # --- DATABASE SETUP ---
 Base = declarative_base()
@@ -179,6 +181,19 @@ def loading_animation(chat_id, msg_id):
             bot.edit_message_text(f"⚡ **AURA Processing**\n\n{stage}", chat_id, msg_id, parse_mode="Markdown")
             time.sleep(0.4)
         except: pass
+
+# 🛡️ BOT PROTECTION: ANTI-GROUP/CHANNEL ADD
+@bot.my_chat_member_handler()
+def prevent_unauthorized_groups(message: ChatMemberUpdated):
+    if message.new_chat_member.status in ['member', 'administrator']:
+        if message.from_user.id != OWNER_ID:
+            try:
+                bot.send_message(message.chat.id, "🚫 **UNAUTHORIZED ADD:**\nSudhumatro Owner amake group ba channel e add korte parbe. Ami eikhane thakte parchi na, Goodbye! 👋", parse_mode="Markdown")
+                bot.leave_chat(message.chat.id)
+            except:
+                bot.leave_chat(message.chat.id)
+        else:
+            bot.send_message(message.chat.id, "✅ **Authorized!** Owner amake ei chat e add korechen. Ready to work!")
 
 # --- CORE USER COMMANDS ---
 @bot.message_handler(commands=['start'])
@@ -378,7 +393,8 @@ def process_payment_trxid(message, file_id):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('apv|'))
 def admin_approve_payment(call):
-    if call.from_user.id != OWNER_ID: return
+    if call.from_user.id != OWNER_ID: 
+        return bot.answer_callback_query(call.id, "🚫 UNAUTHORIZED!", show_alert=True)
     parts = call.data.split('|')
     action = parts[1]
     target_id = int(parts[2])
@@ -402,7 +418,8 @@ def admin_approve_payment(call):
 # --- A TO Z ADMIN COMMANDS ---
 @bot.message_handler(commands=['cmds'])
 def a_to_z_commands(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     text = """👑 **AURA Admin Commands (A to Z)** 👑
 
 **🔧 System & Management:**
@@ -437,7 +454,8 @@ _Example: /gencode10 silver 24_
 
 @bot.message_handler(commands=['gift'])
 def gift_cmd(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     try:
         parts = message.text.split()
         user_id = int(parts[1])
@@ -460,6 +478,8 @@ def gift_cmd(message):
 
 @bot.message_handler(commands=['ping'])
 def ping_cmd(message):
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     start_time = time.time()
     msg = bot.reply_to(message, "Pinging...")
     end_time = time.time()
@@ -467,14 +487,16 @@ def ping_cmd(message):
 
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("📊 System Stats", callback_data="admin_stats"), InlineKeyboardButton("🛠 Maint. Mode", callback_data="admin_maint"))
     bot.reply_to(message, "👑 **AURA Admin Control Panel**", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
 def admin_callbacks(call):
-    if call.from_user.id != OWNER_ID: return
+    if call.from_user.id != OWNER_ID: 
+        return bot.answer_callback_query(call.id, "🚫 UNAUTHORIZED!", show_alert=True)
     action = call.data.split('_')[1]
     
     if action == "stats":
@@ -498,7 +520,8 @@ def admin_callbacks(call):
 
 @bot.message_handler(commands=['search'])
 def search_user(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     try:
         user_id = int(message.text.split()[1])
         db = SessionLocal()
@@ -510,7 +533,8 @@ def search_user(message):
 
 @bot.message_handler(commands=['ban', 'unban'])
 def ban_unban_user(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     try:
         cmd = message.text.split()[0].replace('/', '')
         user_id = int(message.text.split()[1])
@@ -526,7 +550,8 @@ def ban_unban_user(message):
 
 @bot.message_handler(commands=['setrole'])
 def set_role_cmd(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     try:
         parts = message.text.split()
         user_id = int(parts[1])
@@ -548,7 +573,8 @@ def set_role_cmd(message):
 
 @bot.message_handler(commands=['addlimit'])
 def add_limit_cmd(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     try:
         parts = message.text.split()
         user_id = int(parts[1])
@@ -566,7 +592,8 @@ def add_limit_cmd(message):
 
 @bot.message_handler(commands=['export'])
 def export_db_cmd(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     db = SessionLocal()
     users = db.query(User).all()
     
@@ -581,7 +608,8 @@ def export_db_cmd(message):
 
 @bot.message_handler(commands=['msg'])
 def direct_msg_cmd(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     try:
         parts = message.text.split(' ', 2)
         target_id = int(parts[1])
@@ -592,7 +620,8 @@ def direct_msg_cmd(message):
 
 @bot.message_handler(commands=['sendad'])
 def send_ad_cmd(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     try:
         parts = message.text.split('|')
         text = parts[0].replace('/sendad ', '').strip()
@@ -614,10 +643,10 @@ def send_ad_cmd(message):
         bot.reply_to(message, f"✅ Ad sent to {success} users.")
     except: bot.reply_to(message, "Use: `/sendad Ad Text | Button Text | Button URL`")
 
-# 🎁 GENCODE SYSTEM
 @bot.message_handler(func=lambda m: m.text and m.text.startswith('/gencode'))
 def generate_code_cmd(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     
     parts = message.text.split()
     cmd = parts[0].lower()
@@ -661,7 +690,6 @@ def generate_code_cmd(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Error: Role ba format vul. Example: `/gencode100 diamond 48`", parse_mode="Markdown")
 
-# 💳 REDEEM SYSTEM
 @bot.message_handler(commands=['redeem'])
 def redeem_cmd(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID: return
@@ -697,7 +725,8 @@ def redeem_cmd(message):
 
 @bot.message_handler(commands=['broadcast'])
 def broadcast_cmd(message):
-    if message.from_user.id != OWNER_ID: return
+    if message.from_user.id != OWNER_ID: 
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     msg_text = message.text.replace('/broadcast', '').strip()
     if not msg_text: return bot.reply_to(message, "⚠️ Eivabe likhun: `/broadcast Hello!`", parse_mode="Markdown")
     
