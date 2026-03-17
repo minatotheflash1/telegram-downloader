@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 8651895707 # Main Owner ID
+OWNER_ID = 8651895707 # APNAR MAIN ADMIN ID
 DATABASE_URL = os.getenv("DATABASE_URL")
 FORCE_CHANNELS = [] 
 
@@ -68,8 +68,8 @@ class User(Base):
     role_expires_at = Column(DateTime, nullable=True) 
     last_code_used = Column(DateTime, nullable=True) 
     last_daily_claim = Column(DateTime, nullable=True)
-    last_spin = Column(DateTime, nullable=True) # 🎰 Lucky Spin
-    auto_delete = Column(Boolean, default=False) # ⚙️ User Settings
+    last_spin = Column(DateTime, nullable=True) 
+    auto_delete = Column(Boolean, default=False) 
     total_downloads = Column(Integer, default=0)
     is_banned = Column(Boolean, default=False)
     referred_by = Column(BigInteger, nullable=True)
@@ -84,7 +84,6 @@ class RedeemCode(Base):
     expires_at = Column(DateTime, nullable=True) 
     is_used = Column(Boolean, default=False)
 
-# DATABASE SAFETY: Table drop kora bondho, jate data save thake!
 Base.metadata.create_all(engine)
 
 def get_user(db, user_id, user_name="User", referrer_id=None):
@@ -181,7 +180,7 @@ def loading_animation(chat_id, msg_id):
             time.sleep(0.4)
         except: pass
 
-# --- USER COMMANDS ---
+# --- CORE USER COMMANDS ---
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID:
@@ -201,23 +200,45 @@ def start_cmd(message):
     db = SessionLocal()
     user = get_user(db, message.from_user.id, message.from_user.first_name, referrer_id)
     total_users = db.query(User).count()
+    total_bot_dls = sum([u.total_downloads for u in db.query(User).all()])
     db.close()
     
     if user.is_banned: return bot.reply_to(message, "❌ You are banned.")
     
-    text = f"🚀 **Hello {message.from_user.first_name}, Welcome to AURA!**\n\nDrop any video link to start downloading instantly.\n\n👑 **Role:** `{user.role.capitalize()}`\n📥 **Usage:** `{user.daily_downloads} / {LIMITS[user.role]}`\n👥 **Community:** `{total_users} Users`"
-    bot.send_message(message.chat.id, text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown")
+    if user.role == 'owner':
+        role_text = "🔴 👑 **OWNER** 👑 🔴"
+        usage_text = f"{user.total_downloads} / ∞"
+    else:
+        role_text = f"`{user.role.capitalize()}`"
+        usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
 
-# ⚙️ SETTINGS MENU
+    text = f"🚀 **Hello {message.from_user.first_name} , Welcome to AURA DOWNLOADER!**\n"
+    text += "Drop any video link to start downloading instantly.\n\n"
+    text += f"👑 **Role:** {role_text}\n"
+    text += f"📥 **Usage:** `{usage_text}`\n"
+    text += f"👥 **Community:** `{total_users} Users`\n\n"
+    text += f"👨‍💻 **DEV :** [Ononto Hasan](https://www.facebook.com/yours.ononto)"
+
+    bot.send_message(message.chat.id, text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown", disable_web_page_preview=True)
+
+    if message.from_user.id == OWNER_ID:
+        cpu, ram = psutil.cpu_percent(), psutil.virtual_memory().percent
+        flex_text = f"🛡️ **WELCOME ADMIN!** 🛡️\n\n"
+        flex_text += "Boss, bot is running smoothly! Here is your Empire's Status:\n\n"
+        flex_text += f"📈 **Total Users:** `{total_users}`\n"
+        flex_text += f"🚀 **Total Files Downloaded:** `{total_bot_dls}`\n"
+        flex_text += f"🖥️ **Server CPU:** `{cpu}%` | **RAM:** `{ram}%`\n\n"
+        flex_text += "Awaiting your command, Master! 🫡"
+        time.sleep(0.5)
+        bot.send_message(message.chat.id, flex_text, parse_mode="Markdown")
+
 @bot.message_handler(commands=['settings'])
 def settings_cmd(message):
     db = SessionLocal()
     user = get_user(db, message.from_user.id)
-    
     status = "ON 🟢" if user.auto_delete else "OFF 🔴"
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton(f"Auto-Delete Messages: {status}", callback_data=f"set_autodel|{user.id}"))
-    
     bot.reply_to(message, "⚙️ **User Settings**\nConfigure your AURA experience:", reply_markup=markup, parse_mode="Markdown")
     db.close()
 
@@ -226,28 +247,23 @@ def toggle_auto_delete(call):
     db = SessionLocal()
     user_id = int(call.data.split('|')[1])
     user = get_user(db, user_id)
-    
     user.auto_delete = not user.auto_delete
     db.commit()
-    
     status = "ON 🟢" if user.auto_delete else "OFF 🔴"
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton(f"Auto-Delete Messages: {status}", callback_data=f"set_autodel|{user.id}"))
-    
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
     bot.answer_callback_query(call.id, f"Auto-Delete turned {status.split()[0]}")
     db.close()
 
-# 🎰 LUCKY SPIN SYSTEM (Limit thekei nibe)
 @bot.message_handler(commands=['spin'])
 def lucky_spin_cmd(message):
     db = SessionLocal()
     user = get_user(db, message.from_user.id)
     
-    # Check if user still has download limits left
     if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
         db.close()
-        return bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit ({LIMITS[user.role]}) shesh holei apni Lucky Spin 🎰 khelte parben.", parse_mode="Markdown")
+        return bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit shesh holei apni Lucky Spin 🎰 khelte parben.", parse_mode="Markdown")
 
     if user.last_spin and user.last_spin.date() == datetime.now().date():
         db.close()
@@ -256,21 +272,20 @@ def lucky_spin_cmd(message):
     user.last_spin = datetime.now()
     bot.reply_to(message, "🎰 **Spinning the wheel...**")
     time.sleep(1.5)
-    
     chance = random.randint(1, 100)
     
-    if chance <= 10: # 10% Chance
+    if chance <= 10:
         user.role = 'silver'
         user.role_expires_at = datetime.now() + timedelta(hours=1)
         user.daily_downloads = 0
         result = "🎉 **JACKPOT!** Apni peyechen **1 Hour Silver Plan**! Enjoy unlimited fast downloads for 1 hr."
-    elif chance <= 30: # 20% Chance
+    elif chance <= 30:
         user.daily_downloads = max(0, user.daily_downloads - 3)
         result = "🎁 **Awesome!** Apni peyechen **+3 Extra Downloads** ajker jonno!"
-    elif chance <= 60: # 30% Chance
+    elif chance <= 60:
         user.daily_downloads = max(0, user.daily_downloads - 1)
         result = "🎁 **Good!** Apni peyechen **+1 Extra Download** ajker jonno!"
-    else: # 40% Chance
+    else:
         result = "💔 **Better luck next time!** Ajke kichu jiten ni. Kalke abar try korun!"
         
     db.commit()
@@ -282,14 +297,20 @@ def bottom_menu_handler(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID: return
     db = SessionLocal()
     user = get_user(db, message.from_user.id, message.from_user.first_name)
-    
     if user.is_banned:
         db.close()
         return
     
     if message.text == "👤 Profile":
         expiry = user.role_expires_at.strftime("%Y-%m-%d %H:%M") if user.role_expires_at else "Lifetime"
-        text = f"👤 **AURA Profile**\n\n🆔 ID: `{user.id}`\n👑 Role: `{user.role.capitalize()}`\n⏳ Expiry: `{expiry}`\n📊 **Usage:** `{user.daily_downloads} / {LIMITS[user.role]}`\n📥 **Total:** `{user.total_downloads}`\n👥 **Invites:** `{user.referral_count}`\n🎰 **Try /spin when limit is over!**"
+        if user.role == 'owner':
+            role_text = "🔴 👑 **OWNER** 👑 🔴"
+            usage_text = f"{user.total_downloads} / ∞"
+        else:
+            role_text = f"`{user.role.capitalize()}`"
+            usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
+
+        text = f"👤 **AURA Profile**\n\n🆔 ID: `{user.id}`\n👑 Role: {role_text}\n⏳ Expiry: `{expiry}`\n📊 **Usage:** `{usage_text}`\n📥 **Total:** `{user.total_downloads}`\n👥 **Invites:** `{user.referral_count}`\n🎰 **Try /spin when limit is over!**"
         bot.reply_to(message, text, parse_mode="Markdown")
         
     elif message.text == "💎 Get Subscriptions":
@@ -301,7 +322,8 @@ def bottom_menu_handler(message):
         top = db.query(User).order_by(User.total_downloads.desc()).limit(5).all()
         text = "🏆 **Top AURA Users**\n\n"
         for i, u in enumerate(top): 
-            text += f"{i+1}. {u.name} (`{u.id}`) - **{u.role.upper()}** - 📥 {u.total_downloads}\n"
+            r_str = "OWNER" if u.role == 'owner' else u.role.upper()
+            text += f"{i+1}. {u.name} (`{u.id}`) - **{r_str}** - 📥 {u.total_downloads}\n"
         bot.reply_to(message, text, parse_mode="Markdown")
         
     elif message.text == "🎁 Invite & Earn":
@@ -310,7 +332,6 @@ def bottom_menu_handler(message):
         bot.reply_to(message, text, parse_mode="Markdown")
 
     elif message.text == "🎁 Daily Claim":
-        # Check limit for daily claim
         if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
             bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit ({LIMITS[user.role]}) shesh holei apni Daily Claim bebohar korte parben.", parse_mode="Markdown")
         elif user.last_daily_claim and user.last_daily_claim.date() == datetime.now().date():
@@ -693,6 +714,18 @@ def broadcast_cmd(message):
         except: pass
     db.close()
     bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success} users.")
+
+@bot.message_handler(commands=['feedback'])
+def feedback_cmd(message):
+    if MAINTENANCE and message.from_user.id != OWNER_ID: return
+    msg_text = message.text.replace('/feedback', '').strip()
+    if not msg_text: return bot.reply_to(message, "⚠️ Eivabe likhun: `/feedback Amar problem hocche...`", parse_mode="Markdown")
+    
+    try:
+        bot.send_message(OWNER_ID, f"📩 **Feedback:**\nUser: {message.from_user.first_name} (`{message.from_user.id}`)\nMsg: {msg_text}", parse_mode="Markdown")
+        bot.reply_to(message, "✅ Feedback sent!")
+    except:
+        bot.reply_to(message, "❌ Error sending feedback.")
 
 # --- ANTI-SPAM & LINK PROCESSOR ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
