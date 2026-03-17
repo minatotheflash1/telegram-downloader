@@ -94,7 +94,7 @@ class RedeemCode(Base):
     expires_at = Column(DateTime, nullable=True)
     is_used = Column(Boolean, default=False)
 
-# ⚠️ Warning column notun add hoyeche, tai table update korar jonno:
+Base.metadata.drop_all(engine) # ⚠️ Ei line ta add korun (Reset DB)
 Base.metadata.create_all(engine)
 
 def get_user(db, user_id, user_name="User", referrer_id=None):
