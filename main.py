@@ -6,6 +6,11 @@ import logging
 import glob
 import csv
 import random
+try:
+    import psutil
+except ImportError:
+    os.system("pip install psutil")
+    import psutil
 from io import StringIO
 from datetime import datetime, timedelta
 import yt_dlp
@@ -15,19 +20,13 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteg
 from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 
-try:
-    import psutil
-except ImportError:
-    os.system("pip install psutil")
-    import psutil
-
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 8037371175 # Apnar Admin ID
+OWNER_ID = 8037371175  # Apnar Main Admin ID
 DATABASE_URL = os.getenv("DATABASE_URL")
 FORCE_CHANNELS = [] 
 
@@ -46,8 +45,20 @@ MAINTENANCE_MSG = "🛠 **Bot under maintenance. Please wait.**"
 url_storage = {}
 user_cooldowns = {}
 
-LIMITS = {'free': 5, 'silver': 20, 'gold': 50, 'diamond': 100, 'owner': 999999}
-PRICING = {'silver': '10 TK', 'gold': '50 TK', 'diamond': '100 TK'}
+LIMITS = {
+    'free': 5, 
+    'silver': 20, 
+    'gold': 50, 
+    'diamond': 100, 
+    'owner': 999999
+}
+
+PRICING = {
+    'silver': '10 TK', 
+    'gold': '50 TK', 
+    'diamond': '100 TK'
+}
+
 UNAUTH_MSG = "🚫 **UNAUTHORIZED:** Sudhumatro Owner ei command ti bebohar korte parbe!"
 
 # --- DATABASE SETUP ---
@@ -119,9 +130,11 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
 def daily_tasks():
     db = SessionLocal()
     try:
+        # Limit Reset
         db.query(User).update({User.daily_downloads: 0})
         db.commit()
         
+        # Daily DB Backup for Owner
         users = db.query(User).all()
         csv_data = StringIO()
         writer = csv.writer(csv_data)
@@ -180,9 +193,12 @@ def clean_url(url):
 def get_bottom_keyboard():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
-        KeyboardButton("👤 Profile"), KeyboardButton("💎 Get Subscriptions"),
-        KeyboardButton("🏆 Leaderboard"), KeyboardButton("🎁 Invite & Earn"),
-        KeyboardButton("🎁 Daily Claim"), KeyboardButton("ℹ️ Help & Rules")
+        KeyboardButton("👤 Profile"), 
+        KeyboardButton("💎 Get Subscriptions"),
+        KeyboardButton("🏆 Leaderboard"), 
+        KeyboardButton("🎁 Invite & Earn"),
+        KeyboardButton("🎁 Daily Claim"), 
+        KeyboardButton("ℹ️ Help & Rules")
     )
     return markup
 
@@ -348,7 +364,7 @@ def bottom_menu_handler(message):
 
     elif message.text == "🎁 Daily Claim":
         if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
-            bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit shesh holei apni Daily Claim bebohar korte parben.", parse_mode="Markdown")
+            bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit ({LIMITS[user.role]}) shesh holei apni Daily Claim bebohar korte parben.", parse_mode="Markdown")
         elif user.last_daily_claim and user.last_daily_claim.date() == datetime.now().date():
             bot.reply_to(message, "⚠️ Ajker daily claim apni already niye niyechhen! Kal abar ashben.")
         else:
@@ -501,7 +517,8 @@ def generate_code_cmd(message):
     
     try:
         role = parts[1].lower()
-        if role not in ['silver', 'gold', 'diamond']: raise ValueError
+        if role not in ['silver', 'gold', 'diamond']: 
+            raise ValueError
         hours = int(parts[2])
         expires_at = datetime.now() + timedelta(hours=hours)
         
@@ -580,7 +597,8 @@ def gift_cmd(message):
         user_id = int(parts[1])
         role = parts[2].lower()
         days = int(parts[3])
-        if role not in LIMITS.keys(): raise ValueError
+        if role not in LIMITS.keys(): 
+            raise ValueError
         
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
@@ -611,7 +629,10 @@ def admin_panel(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("📊 System Stats", callback_data="admin_stats"), InlineKeyboardButton("🛠 Maint. Mode", callback_data="admin_maint"))
+    markup.row(
+        InlineKeyboardButton("📊 System Stats", callback_data="admin_stats"), 
+        InlineKeyboardButton("🛠 Maint. Mode", callback_data="admin_maint")
+    )
     bot.reply_to(message, "👑 **AURA Admin Control Panel**", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
@@ -631,7 +652,10 @@ def admin_callbacks(call):
         bot.answer_callback_query(call.id)
         
         markup = InlineKeyboardMarkup()
-        markup.row(InlineKeyboardButton("📊 System Stats", callback_data="admin_stats"), InlineKeyboardButton("🛠 Maint. Mode", callback_data="admin_maint"))
+        markup.row(
+            InlineKeyboardButton("📊 System Stats", callback_data="admin_stats"), 
+            InlineKeyboardButton("🛠 Maint. Mode", callback_data="admin_maint")
+        )
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
         
     elif action == "maint":
@@ -683,7 +707,8 @@ def set_role_cmd(message):
         parts = message.text.split()
         user_id = int(parts[1])
         role = parts[2].lower()
-        if role not in LIMITS.keys(): raise ValueError
+        if role not in LIMITS.keys(): 
+            raise ValueError
         
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
@@ -801,7 +826,7 @@ def broadcast_cmd(message):
     db.close()
     bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success} users.")
 
-# --- CORE DOWNLOADER (EXACT QUALITY / SHORTS FIX) ---
+# --- CORE DOWNLOADER (YT/SHORTS FIXED & 2GB READY) ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
     user_id = message.from_user.id
