@@ -133,14 +133,10 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
 def daily_tasks():
     db = SessionLocal()
     try:
-        # 1. Reset Limits
         db.query(User).update({User.daily_downloads: 0})
-        
-        # 2. Auto DB Cleaner (Delete expired codes)
         db.query(RedeemCode).filter(RedeemCode.expires_at < datetime.now()).delete()
         db.commit()
         
-        # 3. Daily DB Backup to Admin
         users = db.query(User).all()
         csv_data = StringIO()
         writer = csv.writer(csv_data)
@@ -219,7 +215,7 @@ def get_inline_menu(msg_id):
         InlineKeyboardButton("🎬 4K/HQ Video", callback_data=f"dl|4k|{msg_id}")
     )
     markup.row(
-        InlineKeyboardButton("🎵 Audio (320kbps)", callback_data=f"dl|aud|{msg_id}"),
+        InlineKeyboardButton("🎵 Audio (320k)", callback_data=f"dl|aud|{msg_id}"),
         InlineKeyboardButton("🖼 Thumb", callback_data=f"dl|thumb|{msg_id}")
     )
     markup.row(
@@ -363,7 +359,7 @@ def bottom_menu_handler(message):
             
         warn_text = f"\n⚠️ **Warnings:** `{user.warnings}/3`" if user.warnings > 0 else ""
 
-        text = f"👤 **AURA Profile**\n\n🆔 ID: `{user.id}`\n👑 Role: {role_text}\n⏳ Expiry: `{expiry}`\n📊 **Usage:** `{usage_text}`\n📥 **Total:** `{user.total_downloads}`\n👥 **Invites:** `{user.referral_count}`{warn_text}\n🎰 **Try /spin when limit is over!**"
+        text = f"👤 **AURA Profile**\n\n🆔 ID: `{user.id}`\n👑 Role: {role_text}\n⏳ Expiry: `{expiry}`\n📊 **Usage:** `{usage_text}`\n📥 **Total DLs:** `{user.total_downloads}`\n👥 **Invites:** `{user.referral_count}`{warn_text}\n🎰 **Try /spin when limit is over!**"
         bot.reply_to(message, text, parse_mode="Markdown")
         
     elif message.text == "💎 Get Subscriptions":
@@ -396,7 +392,7 @@ def bottom_menu_handler(message):
 
     elif message.text == "🎁 Daily Claim":
         if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
-            bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit shesh holei apni Daily Claim bebohar korte parben.", parse_mode="Markdown")
+            bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit ({LIMITS[user.role]}) shesh holei apni Daily Claim bebohar korte parben.", parse_mode="Markdown")
         elif user.last_daily_claim and user.last_daily_claim.date() == datetime.now().date():
             bot.reply_to(message, "⚠️ Ajker daily claim apni already niye niyechhen! Kal abar ashben.")
         else:
@@ -701,7 +697,6 @@ def generate_code_cmd(message):
             codes_str = "\n".join([f"`{c}`" for c in generated_codes])
             msg = bot.reply_to(message, f"🎁 **Codes Generated!**\n\n👑 Role: `{role.capitalize()}`\n\n{codes_str}", parse_mode="Markdown")
             
-            # Feature: Self-Destruct Codes after 60s
             if cmd != '/customcode':
                 time.sleep(60)
                 try:
@@ -1032,7 +1027,7 @@ def support_ticket(message):
     except:
         pass
 
-# --- CORE DOWNLOADER (EXACT QUALITY / 4K / SHORTS FIX) ---
+# --- CORE DOWNLOADER (THE MAGICAL YOUTUBE FIX) ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
     user_id = message.from_user.id
@@ -1124,14 +1119,19 @@ def process_dl(call):
     elif dl_type == 'aud':
         format_string = 'bestaudio[ext=m4a]/bestaudio/best'
 
+    # 🔥🔥 THE ULTIMATE YOUTUBE FIX 🔥🔥
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
         'max_filesize': max_size,
         'quiet': True,
+        'nocheckcertificate': True,
+        'no_warnings': True,
+        'ignoreerrors': True,
         'noplaylist': True,
         'format': format_string,
+        'extractor_args': {'youtube': ['player_client=android']}, # Eita YouTube ke block kora theke atkabe
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
     }
     
