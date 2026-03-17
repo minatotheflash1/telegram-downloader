@@ -28,7 +28,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = 8651895707 # Main Owner ID
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Multi-Channel Force Sub (Array)
+# Multi-Channel Force Sub
 FORCE_CHANNELS = [] 
 
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
@@ -99,7 +99,6 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
                 try: bot.send_message(referrer.id, f"🎉 Kew apnar invite link diye join koreche! +2 Extra Download limit added.")
                 except: pass
 
-    # Smart Role Expiry Reset
     if user.role not in ['free', 'owner'] and user.role_expires_at:
         if datetime.now() > user.role_expires_at:
             user.role = 'free'
@@ -129,7 +128,7 @@ scheduler.add_job(reset_daily_limits, 'cron', hour=0, minute=0)
 scheduler.add_job(clean_storage, 'interval', hours=12) 
 scheduler.start()
 
-# --- UTILS ---
+# --- UTILS & UI ---
 def check_force_sub(user_id):
     if not FORCE_CHANNELS: return True
     if user_id == OWNER_ID: return True
@@ -145,7 +144,6 @@ def clean_url(url):
         return url.split('?')[0]
     return url
 
-# --- UI MENUS ---
 def get_bottom_keyboard():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
@@ -155,7 +153,6 @@ def get_bottom_keyboard():
     )
     return markup
 
-# 🔄 EKHANE NOTUN SIMPLIFIED MENU
 def get_inline_menu(msg_id):
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🎬 Video", callback_data=f"dl|vid|{msg_id}"),
@@ -163,6 +160,20 @@ def get_inline_menu(msg_id):
     markup.row(InlineKeyboardButton("🖼 Thumb", callback_data=f"dl|thumb|{msg_id}"),
                InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
     return markup
+
+# 🔥 NEW SMART LOADING ANIMATION
+def loading_animation(chat_id, msg_id):
+    stages = [
+        "⚙️ Preparing request... `[■□□□□□□□□□]`",
+        "🔍 Fetching Links... `[■■■□□□□□□□]`",
+        "📥 Downloading... `[■■■■■■□□□□]`",
+        "✅ Extraction Complete! `[■■■■■■■■■■]`"
+    ]
+    for stage in stages:
+        try:
+            bot.edit_message_text(f"⚡ **AURA Processing**\n\n{stage}", chat_id, msg_id, parse_mode="Markdown")
+            time.sleep(0.4)
+        except: pass
 
 # --- USER COMMANDS ---
 @bot.message_handler(commands=['start'])
@@ -196,7 +207,6 @@ def bottom_menu_handler(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID: return
     db = SessionLocal()
     user = get_user(db, message.from_user.id, message.from_user.first_name)
-    
     if user.is_banned:
         db.close()
         return
@@ -651,11 +661,10 @@ def handle_link(message):
 def cancel_action(call):
     bot.delete_message(call.message.chat.id, call.message.message_id)
 
-# 🔄 EKHANE NOTUN SIMPLIFIED DOWNLOAD LOGIC (NO 1080/720 MERGE ERRORS)
 @bot.callback_query_handler(func=lambda call: call.data.startswith('dl|'))
 def process_dl(call):
     parts = call.data.split('|')
-    dl_type = parts[1] # Ekhon sudhu 'vid', 'aud', 'thumb' hobe
+    dl_type = parts[1]
     msg_id = int(parts[2])
     url = url_storage.get(msg_id)
     
@@ -668,7 +677,10 @@ def process_dl(call):
         db.close()
         return bot.answer_callback_query(call.id, "❌ Limit Exceeded! Get subscriptions.", show_alert=True)
 
-    msg = bot.edit_message_text("⏳ Extracting data...", call.message.chat.id, call.message.message_id)
+    msg = bot.edit_message_text("⏳ Processing request...", call.message.chat.id, call.message.message_id)
+    
+    # 🔥 LIVE ANIMATION CALL
+    loading_animation(call.message.chat.id, msg.message_id)
 
     if user.role != 'owner': 
         user.daily_downloads += 1
@@ -677,29 +689,27 @@ def process_dl(call):
 
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
-        'max_filesize': 50 * 1024 * 1024, # 50MB telegram limit
+        'max_filesize': 50 * 1024 * 1024,
         'quiet': True, 'noplaylist': True,
         'http_headers': {'User-Agent': 'Mozilla/5.0'}
     }
     
-    # Simple Format Selection (No merging needed = No errors)
-    if dl_type == 'vid': 
-        ydl_opts['format'] = 'best[ext=mp4]/best' 
-    elif dl_type == 'aud': 
-        ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
-    elif dl_type == 'thumb': 
-        ydl_opts['skip_download'] = True
-        ydl_opts['writethumbnail'] = True
+    if dl_type == 'vid': ydl_opts['format'] = 'best[ext=mp4]/best' 
+    elif dl_type == 'aud': ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
+    elif dl_type == 'thumb': ydl_opts['skip_download'] = True; ydl_opts['writethumbnail'] = True
 
     try:
+        # Message update to Uploading...
+        bot.edit_message_text("🚀 **Uploading to Telegram...**\nDoya kore ektu opekha korun.", call.message.chat.id, msg.message_id, parse_mode="Markdown")
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            bot.delete_message(call.message.chat.id, msg.message_id)
-
+            
             if dl_type == 'thumb':
                 thumb_url = info.get('thumbnail')
                 if thumb_url:
                     bot.send_photo(call.message.chat.id, thumb_url, caption="🖼 **AURA Thumbnail**", parse_mode="Markdown")
+                bot.delete_message(call.message.chat.id, msg.message_id)
                 return
 
             downloaded_files = glob.glob(f'downloads/{info["id"]}_{user.id}.*')
@@ -714,17 +724,17 @@ def process_dl(call):
                 with open(path, 'rb') as file:
                     if dl_type == 'aud': bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA**")
                     else: bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**")
+                
                 os.remove(path)
+                bot.delete_message(call.message.chat.id, msg.message_id)
                 
     except Exception as e:
         logger.error(f"DL Error: {e}")
-        # Auto Refund
         if user.role != 'owner' and user.daily_downloads > 0:
             user.daily_downloads -= 1
         user.total_downloads -= 1
         db.commit()
-        
-        bot.send_message(call.message.chat.id, "❌ Download failed or file too large. Apnar limit refund deya hoyeche!")
+        bot.edit_message_text("❌ Download failed or file too large. Apnar limit refund deya hoyeche!", call.message.chat.id, msg.message_id)
     finally:
         db.close()
         if msg_id in url_storage: del url_storage[msg_id]
