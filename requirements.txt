@@ -1,6 +1,6 @@
-pyTelegramBotAPI
-sqlalchemy
 psycopg2-binary
+pyTelegramBotAPI
 yt-dlp
+SQLAlchemy
 apscheduler
 psutil
