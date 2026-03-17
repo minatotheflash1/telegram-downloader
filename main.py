@@ -4,6 +4,8 @@ import string
 import time
 import logging
 import glob
+import csv
+from io import StringIO
 from datetime import datetime, timedelta
 import yt_dlp
 import telebot
@@ -26,11 +28,15 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = 8651895707 # Main Owner ID
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Multi-Channel Force Sub (Array)
+FORCE_CHANNELS = [] 
+
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 url_storage = {}
+user_cooldowns = {} 
 MAINTENANCE = False 
 
 # --- SUBSCRIPTION LIMITS & PRICING ---
@@ -42,11 +48,7 @@ LIMITS = {
     'owner': 999999
 }
 
-PRICING = {
-    'silver': '10 TK',
-    'gold': '50 TK',
-    'diamond': '100 TK'
-}
+PRICING = {'silver': '10 TK', 'gold': '50 TK', 'diamond': '100 TK'}
 
 # --- DATABASE SETUP ---
 Base = declarative_base()
@@ -61,10 +63,12 @@ class User(Base):
     daily_downloads = Column(Integer, default=0) 
     role_expires_at = Column(DateTime, nullable=True) 
     last_code_used = Column(DateTime, nullable=True) 
+    last_daily_claim = Column(DateTime, nullable=True)
     total_downloads = Column(Integer, default=0)
     is_banned = Column(Boolean, default=False)
     referred_by = Column(BigInteger, nullable=True)
     referral_count = Column(Integer, default=0)
+    join_date = Column(DateTime, default=datetime.now)
 
 class RedeemCode(Base):
     __tablename__ = "redeem_codes"
@@ -74,45 +78,35 @@ class RedeemCode(Base):
     expires_at = Column(DateTime, nullable=True) 
     is_used = Column(Boolean, default=False)
 
-# ⚠️ Deploy korar por ei nicher line ta delete ba comment kore diben
-Base.metadata.drop_all(engine)
+# DATABASE SAFETY: Drop all bondho kora holo jate data na haray
 Base.metadata.create_all(engine)
 
 def get_user(db, user_id, user_name="User", referrer_id=None):
     user = db.query(User).filter(User.id == user_id).first()
-    is_new = False
     
     if not user:
-        is_new = True
         role = 'owner' if user_id == OWNER_ID else 'free'
         user = User(id=user_id, name=user_name, role=role, referred_by=referrer_id)
         db.add(user)
         db.commit()
         db.refresh(user)
         
-        # Referral Bonus (Referrer gets +2 limit today)
         if referrer_id:
             referrer = db.query(User).filter(User.id == referrer_id).first()
             if referrer:
                 referrer.referral_count += 1
-                referrer.daily_downloads = max(0, referrer.daily_downloads - 2) # Free up 2 limits
+                referrer.daily_downloads = max(0, referrer.daily_downloads - 2)
                 db.commit()
-                try:
-                    bot.send_message(referrer.id, f"🎉 Kew apnar invite link diye join koreche! Apni ajker jonno +2 extra download limit peyechen.")
+                try: bot.send_message(referrer.id, f"🎉 Kew apnar invite link diye join koreche! +2 Extra Download limit added.")
                 except: pass
-                
-        # New User Notification to Admin
-        try:
-            bot.send_message(OWNER_ID, f"🔔 **New User Joined!**\nName: {user_name}\nID: `{user_id}`\nTotal Users: {db.query(User).count()}", parse_mode="Markdown")
-        except: pass
 
-    # Expiry Check
+    # Smart Role Expiry Reset
     if user.role not in ['free', 'owner'] and user.role_expires_at:
         if datetime.now() > user.role_expires_at:
             user.role = 'free'
             user.role_expires_at = None
             db.commit()
-            try: bot.send_message(user.id, "⚠️ Apnar Premium plan er meyad shesh hoye geche. Apni ekhon Free plan e achen.")
+            try: bot.send_message(user.id, "⚠️ Apnar Premium plan er meyad shesh! Apni ekhon Free plan e achen.")
             except: pass
             
     return user
@@ -136,41 +130,49 @@ scheduler.add_job(reset_daily_limits, 'cron', hour=0, minute=0)
 scheduler.add_job(clean_storage, 'interval', hours=12) 
 scheduler.start()
 
+# --- UTILS ---
+def check_force_sub(user_id):
+    if not FORCE_CHANNELS: return True
+    if user_id == OWNER_ID: return True
+    for ch in FORCE_CHANNELS:
+        try:
+            status = bot.get_chat_member(ch, user_id).status
+            if status not in ['creator', 'administrator', 'member']: return False
+        except: return False
+    return True
+
+def clean_url(url):
+    if '?' in url and ('instagram.com' in url or 'tiktok.com' in url):
+        return url.split('?')[0]
+    return url
+
 # --- UI MENUS ---
 def get_bottom_keyboard():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
-        KeyboardButton("👤 Profile"), KeyboardButton("💎 Upgrade Plan"),
-        KeyboardButton("🏆 Leaderboard"), KeyboardButton("🎁 Invite & Earn")
+        KeyboardButton("👤 Profile"), KeyboardButton("💎 Get Subscriptions"),
+        KeyboardButton("🏆 Leaderboard"), KeyboardButton("🎁 Invite & Earn"),
+        KeyboardButton("🎁 Daily Claim"), KeyboardButton("ℹ️ Help & Rules")
     )
     return markup
 
 def get_inline_menu(msg_id):
     markup = InlineKeyboardMarkup()
-    markup.row(
-        InlineKeyboardButton("🎬 1080p", callback_data=f"dl|1080|{msg_id}"),
-        InlineKeyboardButton("🎬 720p", callback_data=f"dl|720|{msg_id}")
-    )
-    markup.row(
-        InlineKeyboardButton("🎵 Audio (m4a)", callback_data=f"dl|aud|{msg_id}"),
-        InlineKeyboardButton("🖼 Thumb", callback_data=f"dl|thumb|{msg_id}")
-    )
+    markup.row(InlineKeyboardButton("🎬 1080p", callback_data=f"dl|1080|{msg_id}"), InlineKeyboardButton("🎬 720p", callback_data=f"dl|720|{msg_id}"))
+    markup.row(InlineKeyboardButton("🎵 Audio", callback_data=f"dl|aud|{msg_id}"), InlineKeyboardButton("🖼 Thumb", callback_data=f"dl|thumb|{msg_id}"))
     markup.row(InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
     return markup
 
-def get_admin_menu():
-    markup = InlineKeyboardMarkup()
-    markup.row(
-        InlineKeyboardButton("📊 System Stats", callback_data="admin_stats"),
-        InlineKeyboardButton("🛠 Maint. Mode", callback_data="admin_maint")
-    )
-    return markup
-
-# --- USER HANDLERS ---
+# --- USER COMMANDS ---
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID:
         return bot.reply_to(message, "🛠 **Bot under maintenance.**", parse_mode="Markdown")
+
+    if not check_force_sub(message.from_user.id):
+        btn = InlineKeyboardMarkup()
+        for ch in FORCE_CHANNELS: btn.add(InlineKeyboardButton(f"📢 Join {ch}", url=f"https://t.me/{ch.replace('@', '')}"))
+        return bot.reply_to(message, "⚠️ **Please join our channels to use the bot!**", reply_markup=btn, parse_mode="Markdown")
 
     parts = message.text.split()
     referrer_id = None
@@ -180,18 +182,15 @@ def start_cmd(message):
 
     db = SessionLocal()
     user = get_user(db, message.from_user.id, message.from_user.first_name, referrer_id)
-    
-    if user.is_banned:
-        db.close()
-        return bot.reply_to(message, "❌ You are banned from using this bot.")
-        
+    total_users = db.query(User).count()
     db.close()
     
-    img_url = "https://images.unsplash.com/photo-1614680376593-902f74cf0d41?q=80&w=800&auto=format&fit=crop"
-    text = f"🚀 **Hello {message.from_user.first_name}, Welcome to AURA Downloader!**\n\nDrop any video link to start downloading instantly.\n\n👑 **Your Role:** `{user.role.capitalize()}`\n📥 **Today's Usage:** `{user.daily_downloads} / {LIMITS[user.role]}`"
-    bot.send_photo(message.chat.id, img_url, caption=text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown")
+    if user.is_banned: return bot.reply_to(message, "❌ You are banned.")
+    
+    text = f"🚀 **Hello {message.from_user.first_name}, Welcome to AURA!**\n\nDrop any video link to start downloading instantly.\n\n👑 **Role:** `{user.role.capitalize()}`\n📥 **Usage:** `{user.daily_downloads} / {LIMITS[user.role]}`\n👥 **Community:** `{total_users} Users`"
+    bot.send_message(message.chat.id, text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown")
 
-@bot.message_handler(func=lambda m: m.text in ["👤 Profile", "💎 Upgrade Plan", "🏆 Leaderboard", "🎁 Invite & Earn"])
+@bot.message_handler(func=lambda m: m.text in ["👤 Profile", "💎 Get Subscriptions", "🏆 Leaderboard", "🎁 Invite & Earn", "🎁 Daily Claim", "ℹ️ Help & Rules"])
 def bottom_menu_handler(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID: return
     db = SessionLocal()
@@ -203,33 +202,39 @@ def bottom_menu_handler(message):
     
     if message.text == "👤 Profile":
         expiry = user.role_expires_at.strftime("%Y-%m-%d %H:%M") if user.role_expires_at else "Lifetime"
-        text = f"👤 **AURA Profile**\n\n🆔 ID: `{user.id}`\n👤 Name: {user.name}\n👑 Role: `{user.role.capitalize()}`\n⏳ Expiry: `{expiry}`\n\n📊 **Today's Downloads:** `{user.daily_downloads} / {LIMITS[user.role]}`\n📥 **Total Downloaded:** `{user.total_downloads}`\n👥 **Total Invites:** `{user.referral_count}`"
+        text = f"👤 **AURA Profile**\n\n🆔 ID: `{user.id}`\n👑 Role: `{user.role.capitalize()}`\n⏳ Expiry: `{expiry}`\n📊 **Usage:** `{user.daily_downloads} / {LIMITS[user.role]}`\n📥 **Total:** `{user.total_downloads}`\n👥 **Invites:** `{user.referral_count}`"
         bot.reply_to(message, text, parse_mode="Markdown")
         
-    elif message.text == "💎 Upgrade Plan":
-        text = "💎 **GET SUBSCRIPTIONS (AURA PREMIUM)** 💎\n\n"
-        text += f"🥈 **Silver:** 20 Downloads/Day ➡️ **{PRICING['silver']}**\n"
-        text += f"🥇 **Gold:** 50 Downloads/Day ➡️ **{PRICING['gold']}**\n"
-        text += f"💎 **Diamond:** 100 Downloads/Day ➡️ **{PRICING['diamond']}**\n\n"
-        text += "💳 **Payment Methods:**\n"
-        text += "Bkash / Nagad: `01846849460` (Send Money)\n\n"
-        text += "⚠️ Payment korar por nicher button e click kore screenshot ar TrxID din."
-        
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("✅ Verify Payment", callback_data="verify_payment"))
+    elif message.text == "💎 Get Subscriptions":
+        text = f"💎 **AURA PREMIUM SUBSCRIPTIONS** 💎\n\n🥈 **Silver:** 20 DL/Day ➡️ **{PRICING['silver']}**\n🥇 **Gold:** 50 DL/Day ➡️ **{PRICING['gold']}**\n💎 **Diamond:** 100 DL/Day ➡️ **{PRICING['diamond']}**\n\n💳 **Bkash/Nagad:** `01846849460` (Send Money)\n\n⚠️ Payment korar por nicher button theke verify korun:"
+        markup = InlineKeyboardMarkup().add(InlineKeyboardButton("✅ Verify Payment", callback_data="verify_payment"))
         bot.reply_to(message, text, reply_markup=markup, parse_mode="Markdown")
             
     elif message.text == "🏆 Leaderboard":
         top = db.query(User).order_by(User.total_downloads.desc()).limit(5).all()
         text = "🏆 **Top AURA Users**\n\n"
-        for i, u in enumerate(top): text += f"{i+1}. {u.name} - 📥 {u.total_downloads}\n"
+        for i, u in enumerate(top): 
+            text += f"{i+1}. {u.name} (`{u.id}`) - **{u.role.upper()}** - 📥 {u.total_downloads}\n"
         bot.reply_to(message, text, parse_mode="Markdown")
         
     elif message.text == "🎁 Invite & Earn":
         bot_username = bot.get_me().username
-        ref_link = f"https://t.me/{bot_username}?start=ref_{user.id}"
-        text = f"🎁 **Invite & Earn!**\n\nApnar invite link diye kew join korlei apni paben **+2 Extra Download Limit** ajker jonno!\n\n🔗 **Your Invite Link:**\n`{ref_link}`\n\nTotal Invited: `{user.referral_count}`"
+        text = f"🎁 **Invite & Earn!**\nGet +2 limit for each invite.\n\n🔗 Link: `https://t.me/{bot_username}?start=ref_{user.id}`"
         bot.reply_to(message, text, parse_mode="Markdown")
+
+    elif message.text == "🎁 Daily Claim":
+        if user.last_daily_claim and user.last_daily_claim.date() == datetime.now().date():
+            bot.reply_to(message, "⚠️ Ajker daily claim apni already niye niyechhen! Kal abar ashben.")
+        else:
+            user.daily_downloads = max(0, user.daily_downloads - 2)
+            user.last_daily_claim = datetime.now()
+            db.commit()
+            bot.reply_to(message, "🎉 **+2 Extra Downloads Added!**\nEnjoy your daily bonus.", parse_mode="Markdown")
+
+    elif message.text == "ℹ️ Help & Rules":
+        text = "🛠 **Commands & Rules:**\n- `/redeem CODE` - Upgrade plan.\n- `/feedback MSG` - Send msg to Admin.\n- Free users get 5 DL/Day.\n- Max 50MB per video."
+        bot.reply_to(message, text, parse_mode="Markdown")
+        
     db.close()
 
 # --- PAYMENT VERIFICATION SYSTEM ---
@@ -240,7 +245,7 @@ def verify_payment_start(call):
 
 def process_payment_ss(message):
     if not message.photo:
-        bot.reply_to(message, "❌ Eita screenshot noy. Doya kore abar 'Upgrade Plan' theke 'Verify Payment' e click kore thikvabe chobi din.")
+        bot.reply_to(message, "❌ Eita screenshot noy. Abar 'Get Subscriptions' theke 'Verify Payment' e click kore chobi din.")
         return
     file_id = message.photo[-1].file_id
     msg = bot.reply_to(message, "✅ Screenshot peyechi. Ebar apnar **TrxID (Transaction ID)** ba je number theke taka pathiyechen seta likhe send korun.")
@@ -286,7 +291,63 @@ def admin_approve_payment(call):
         bot.edit_message_caption(f"{call.message.caption}\n\n✅ **STATUS: APPROVED ({action.upper()})**", call.message.chat.id, call.message.message_id)
     db.close()
 
-# --- MEGA ADMIN COMMANDS (NEW!) ---
+# --- A TO Z ADMIN COMMANDS ---
+@bot.message_handler(commands=['cmds'])
+def a_to_z_commands(message):
+    if message.from_user.id != OWNER_ID: return
+    text = """👑 **AURA Admin Commands (A to Z)** 👑
+
+**🔧 System & Management:**
+`/admin` - Open Visual Admin Panel
+`/ping` - Check Bot server speed
+`/export` - Download DB as CSV
+`/broadcast [Msg]` - Message all users
+`/sendad [Text] | [Btn] | [Link]` - Send promo msg
+`/msg [ID] [Msg]` - Direct message a user
+
+**👤 User Controls:**
+`/search [ID]` - Get user details
+`/ban [ID]` - Ban a user
+`/unban [ID]` - Unban a user
+`/setrole [ID] [Role]` - Update role manually
+`/gift [ID] [Role] [Days]` - Gift role for X days
+`/addlimit [ID] [Amount]` - Give extra downloads
+
+**🎁 Code Generation:**
+`/gencode [Role] [Hours]` - Gen 1 code
+`/gencode[Count] [Role] [Hours]` - Mass gen
+_Example: /gencode10 silver 24_
+
+**💳 General:**
+`/start` - Start bot
+`/redeem [Code]` - Use code
+`/feedback [Msg]` - Message Admin
+"""
+    bot.reply_to(message, text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['gift'])
+def gift_cmd(message):
+    if message.from_user.id != OWNER_ID: return
+    try:
+        parts = message.text.split()
+        user_id = int(parts[1])
+        role = parts[2].lower()
+        days = int(parts[3])
+        if role not in LIMITS.keys(): raise ValueError
+        
+        db = SessionLocal()
+        u = db.query(User).filter(User.id == user_id).first()
+        if u:
+            u.role = role
+            u.role_expires_at = datetime.now() + timedelta(days=days)
+            u.daily_downloads = 0
+            db.commit()
+            bot.reply_to(message, f"✅ Gifted **{role.capitalize()}** to {user_id} for {days} days.")
+            bot.send_message(user_id, f"🎁 **Gift Received!**\nAdmin has gifted you **{role.capitalize()}** for {days} days. Enjoy!")
+        else: bot.reply_to(message, "❌ User not found.")
+        db.close()
+    except: bot.reply_to(message, "Use: `/gift [ID] [role] [days]`", parse_mode="Markdown")
+
 @bot.message_handler(commands=['ping'])
 def ping_cmd(message):
     start_time = time.time()
@@ -297,7 +358,9 @@ def ping_cmd(message):
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
     if message.from_user.id != OWNER_ID: return
-    bot.reply_to(message, "👑 **AURA Admin Control Panel**", reply_markup=get_admin_menu(), parse_mode="Markdown")
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("📊 System Stats", callback_data="admin_stats"), InlineKeyboardButton("🛠 Maint. Mode", callback_data="admin_maint"))
+    bot.reply_to(message, "👑 **AURA Admin Control Panel**", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
 def admin_callbacks(call):
@@ -312,7 +375,10 @@ def admin_callbacks(call):
         cpu, ram = psutil.cpu_percent(), psutil.virtual_memory().percent
         text = f"📊 **System Stats**\n👥 Users: {users}\n📥 Downloads: {dls}\n🖥 CPU: {cpu}% | RAM: {ram}%"
         bot.answer_callback_query(call.id)
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=get_admin_menu(), parse_mode="Markdown")
+        
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("📊 System Stats", callback_data="admin_stats"), InlineKeyboardButton("🛠 Maint. Mode", callback_data="admin_maint"))
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
         
     elif action == "maint":
         global MAINTENANCE
@@ -328,12 +394,9 @@ def search_user(message):
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
         db.close()
-        if u:
-            bot.reply_to(message, f"🔍 **User Details:**\nName: {u.name}\nID: `{u.id}`\nRole: {u.role}\nTotal DLs: {u.total_downloads}\nBanned: {u.is_banned}", parse_mode="Markdown")
-        else:
-            bot.reply_to(message, "❌ User not found.")
-    except:
-        bot.reply_to(message, "Use: `/search [ID]`", parse_mode="Markdown")
+        if u: bot.reply_to(message, f"🔍 **User Details:**\nName: {u.name}\nID: `{u.id}`\nRole: {u.role}\nTotal DLs: {u.total_downloads}\nBanned: {u.is_banned}", parse_mode="Markdown")
+        else: bot.reply_to(message, "❌ User not found.")
+    except: bot.reply_to(message, "Use: `/search [ID]`", parse_mode="Markdown")
 
 @bot.message_handler(commands=['ban', 'unban'])
 def ban_unban_user(message):
@@ -347,11 +410,9 @@ def ban_unban_user(message):
             u.is_banned = (cmd == 'ban')
             db.commit()
             bot.reply_to(message, f"✅ User {user_id} is now {cmd}ned.")
-        else:
-            bot.reply_to(message, "❌ User not found.")
+        else: bot.reply_to(message, "❌ User not found.")
         db.close()
-    except:
-        bot.reply_to(message, "Use: `/ban [ID]` or `/unban [ID]`")
+    except: bot.reply_to(message, "Use: `/ban [ID]` or `/unban [ID]`")
 
 @bot.message_handler(commands=['setrole'])
 def set_role_cmd(message):
@@ -371,11 +432,9 @@ def set_role_cmd(message):
             db.commit()
             bot.reply_to(message, f"✅ User {user_id} role updated to {role}.")
             bot.send_message(user_id, f"🎉 Admin has upgraded your account to **{role.capitalize()}**!")
-        else:
-            bot.reply_to(message, "❌ User not found.")
+        else: bot.reply_to(message, "❌ User not found.")
         db.close()
-    except:
-        bot.reply_to(message, "Use: `/setrole [ID] [role]` (free/silver/gold/diamond)", parse_mode="Markdown")
+    except: bot.reply_to(message, "Use: `/setrole [ID] [role]`", parse_mode="Markdown")
 
 @bot.message_handler(commands=['addlimit'])
 def add_limit_cmd(message):
@@ -384,19 +443,66 @@ def add_limit_cmd(message):
         parts = message.text.split()
         user_id = int(parts[1])
         amount = int(parts[2])
-        
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
         if u:
             u.daily_downloads = max(0, u.daily_downloads - amount)
             db.commit()
-            bot.reply_to(message, f"✅ Added {amount} extra downloads to {user_id} for today.")
+            bot.reply_to(message, f"✅ Added {amount} extra downloads to {user_id}.")
             bot.send_message(user_id, f"🎁 Admin has given you {amount} extra downloads for today!")
-        else:
-            bot.reply_to(message, "❌ User not found.")
+        else: bot.reply_to(message, "❌ User not found.")
         db.close()
-    except:
-        bot.reply_to(message, "Use: `/addlimit [ID] [amount]`", parse_mode="Markdown")
+    except: bot.reply_to(message, "Use: `/addlimit [ID] [amount]`", parse_mode="Markdown")
+
+@bot.message_handler(commands=['export'])
+def export_db_cmd(message):
+    if message.from_user.id != OWNER_ID: return
+    db = SessionLocal()
+    users = db.query(User).all()
+    
+    csv_data = StringIO()
+    writer = csv.writer(csv_data)
+    writer.writerow(['ID', 'Name', 'Role', 'Total DLs', 'Join Date'])
+    for u in users: writer.writerow([u.id, u.name, u.role, u.total_downloads, u.join_date.strftime("%Y-%m-%d")])
+    
+    csv_data.seek(0)
+    bot.send_document(message.chat.id, ('aura_users.csv', csv_data.getvalue()), caption="📊 **Database Export**", parse_mode="Markdown")
+    db.close()
+
+@bot.message_handler(commands=['msg'])
+def direct_msg_cmd(message):
+    if message.from_user.id != OWNER_ID: return
+    try:
+        parts = message.text.split(' ', 2)
+        target_id = int(parts[1])
+        text = parts[2]
+        bot.send_message(target_id, f"📩 **Message from Admin:**\n\n{text}", parse_mode="Markdown")
+        bot.reply_to(message, "✅ Message sent.")
+    except: bot.reply_to(message, "Use: `/msg [ID] [Text]`")
+
+@bot.message_handler(commands=['sendad'])
+def send_ad_cmd(message):
+    if message.from_user.id != OWNER_ID: return
+    try:
+        parts = message.text.split('|')
+        text = parts[0].replace('/sendad ', '').strip()
+        btn_text = parts[1].strip()
+        btn_url = parts[2].strip()
+        
+        markup = InlineKeyboardMarkup().add(InlineKeyboardButton(btn_text, url=btn_url))
+        db = SessionLocal()
+        users = db.query(User).all()
+        
+        success = 0
+        for u in users:
+            try:
+                bot.send_message(u.id, f"📢 **Sponsor/Promo:**\n\n{text}", reply_markup=markup, parse_mode="Markdown")
+                success += 1
+                time.sleep(0.05)
+            except: pass
+        db.close()
+        bot.reply_to(message, f"✅ Ad sent to {success} users.")
+    except: bot.reply_to(message, "Use: `/sendad Ad Text | Button Text | Button URL`")
 
 # 🎁 GENCODE SYSTEM
 @bot.message_handler(func=lambda m: m.text and m.text.startswith('/gencode'))
@@ -437,8 +543,7 @@ def generate_code_cmd(message):
             bot.reply_to(message, f"🎁 **{count} Codes Generated!**\n\n👑 Role: `{role.capitalize()}`\n⏳ Valid To Redeem: `{hours} Hours`\n\n{codes_str}", parse_mode="Markdown")
         else:
             file_name = f"AURA_Codes_{role.upper()}_{count}.txt"
-            with open(file_name, "w") as f:
-                f.write("\n".join(generated_codes))
+            with open(file_name, "w") as f: f.write("\n".join(generated_codes))
             with open(file_name, "rb") as f:
                 bot.send_document(message.chat.id, f, caption=f"🎁 **{count} Codes Generated!**\n👑 Role: `{role.capitalize()}`\n⏳ Valid To Redeem: `{hours} Hours`", parse_mode="Markdown")
             os.remove(file_name)
@@ -467,12 +572,9 @@ def redeem_cmd(message):
     code_in = parts[1].strip()
     c = db.query(RedeemCode).filter(RedeemCode.code == code_in).first()
     
-    if not c:
-        bot.reply_to(message, "❌ Invalid Code. Code ti sothik noy.")
-    elif c.is_used:
-        bot.reply_to(message, "❌ Ei code ti already onno kew use kore feleche.")
-    elif c.expires_at and datetime.now() > c.expires_at:
-        bot.reply_to(message, "❌ Ei code ti expire hoye geche!")
+    if not c: bot.reply_to(message, "❌ Invalid Code. Code ti sothik noy.")
+    elif c.is_used: bot.reply_to(message, "❌ Ei code ti already onno kew use kore feleche.")
+    elif c.expires_at and datetime.now() > c.expires_at: bot.reply_to(message, "❌ Ei code ti expire hoye geche!")
     else:
         user.role = c.role_granted
         user.role_expires_at = datetime.now() + timedelta(days=1)
@@ -503,33 +605,47 @@ def broadcast_cmd(message):
     db.close()
     bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success} users.")
 
-# --- LINK PROCESSOR ---
+# --- ANTI-SPAM & LINK PROCESSOR ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
-    if MAINTENANCE and message.from_user.id != OWNER_ID: return
-    
-    db = SessionLocal()
-    user = get_user(db, message.from_user.id, message.from_user.first_name)
-    if user.is_banned:
-        db.close()
-        return bot.reply_to(message, "❌ You are banned from using this bot.")
-    db.close()
+    user_id = message.from_user.id
+    if MAINTENANCE and user_id != OWNER_ID: return
+    if not check_force_sub(user_id): return bot.reply_to(message, "⚠️ Join channel first.")
 
-    if user.daily_downloads >= LIMITS[user.role]:
+    now = time.time()
+    if user_id in user_cooldowns and (now - user_cooldowns[user_id]) < 3:
+        return bot.reply_to(message, "🐢 **Too fast!** Please wait 3 seconds between links.", parse_mode="Markdown")
+    user_cooldowns[user_id] = now
+
+    db = SessionLocal()
+    user = get_user(db, user_id, message.from_user.first_name)
+    db.close()
+    if user.is_banned: return
+
+    if user.role != 'owner' and user.daily_downloads >= LIMITS[user.role]:
         limit_msg = (
             f"❌ **Apnar ajker Download Limit shesh! ({LIMITS[user.role]}/{LIMITS[user.role]})**\n\n"
             f"💎 **GET SUBSCRIPTIONS:**\n"
             f"🥈 Silver (20 DL) - **{PRICING['silver']}**\n"
             f"🥇 Gold (50 DL) - **{PRICING['gold']}**\n"
             f"💎 Diamond (100 DL) - **{PRICING['diamond']}**\n\n"
-            f"Nicher **'💎 Upgrade Plan'** button a click kore payment korun, naki kalke abar try korun!"
+            f"Nicher **'💎 Get Subscriptions'** button a click kore payment korun, naki kalke abar try korun!"
         )
         return bot.reply_to(message, limit_msg, parse_mode="Markdown")
 
-    url = message.text.strip()
+    bot.send_chat_action(message.chat.id, 'typing')
+    url = clean_url(message.text.strip())
     msg_id = message.message_id
     url_storage[msg_id] = url
-    bot.reply_to(message, "🔗 **Link Analyzed!**\nChoose format & quality:", reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
+    
+    # Platform Detector
+    platform = "Video"
+    if "youtube.com" in url or "youtu.be" in url: platform = "YouTube"
+    elif "facebook.com" in url or "fb.watch" in url: platform = "Facebook"
+    elif "tiktok.com" in url: platform = "TikTok"
+    elif "instagram.com" in url: platform = "Instagram"
+
+    bot.reply_to(message, f"🔗 **{platform} Link Analyzed!**\nChoose format & quality:", reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
 def cancel_action(call):
@@ -547,11 +663,17 @@ def process_dl(call):
     db = SessionLocal()
     user = get_user(db, call.from_user.id, call.from_user.first_name)
     
-    if user.daily_downloads >= LIMITS[user.role]:
+    if user.role != 'owner' and user.daily_downloads >= LIMITS[user.role]:
         db.close()
-        return bot.answer_callback_query(call.id, "❌ Limit Exceeded! Upgrade your plan.", show_alert=True)
+        return bot.answer_callback_query(call.id, "❌ Limit Exceeded! Get subscriptions.", show_alert=True)
 
-    msg = bot.edit_message_text("⏳ Processing request...", call.message.chat.id, call.message.message_id)
+    msg = bot.edit_message_text("⏳ Extracting video data...", call.message.chat.id, call.message.message_id)
+
+    # Pre-deduct limit (will refund if failed)
+    if user.role != 'owner': 
+        user.daily_downloads += 1
+    user.total_downloads += 1
+    db.commit()
 
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
@@ -574,9 +696,6 @@ def process_dl(call):
                 thumb_url = info.get('thumbnail')
                 if thumb_url:
                     bot.send_photo(call.message.chat.id, thumb_url, caption="🖼 **AURA Thumbnail**", parse_mode="Markdown")
-                    user.daily_downloads += 1
-                    user.total_downloads += 1
-                    db.commit()
                 return
 
             downloaded_files = glob.glob(f'downloads/{info["id"]}_{user.id}.*')
@@ -585,30 +704,28 @@ def process_dl(call):
 
             if os.path.exists(path):
                 if os.path.getsize(path) / (1024 * 1024) > 49.5:
-                    bot.send_message(call.message.chat.id, "❌ Video 50MB er theke boro!")
-                    os.remove(path)
-                    return
-
-                user.daily_downloads += 1
-                user.total_downloads += 1
-                db.commit()
+                    raise Exception("Video is larger than 50MB Telegram limit!")
 
                 bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type in ['1080', '720'] else 'upload_document')
                 with open(path, 'rb') as file:
-                    if dl_type == 'aud': 
-                        bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA Downloader**", parse_mode="Markdown")
-                    else: 
-                        bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**", parse_mode="Markdown")
+                    if dl_type == 'aud': bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA**")
+                    else: bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**")
                 os.remove(path)
                 
     except Exception as e:
         logger.error(f"DL Error: {e}")
-        bot.send_message(call.message.chat.id, "❌ Download failed. Link invalid ba private.")
+        # Auto-Refund Logic
+        if user.role != 'owner' and user.daily_downloads > 0:
+            user.daily_downloads -= 1
+        user.total_downloads -= 1
+        db.commit()
+        
+        bot.send_message(call.message.chat.id, "❌ Download failed or file too large. Apnar limit refund deya hoyeche!")
     finally:
         db.close()
         if msg_id in url_storage: del url_storage[msg_id]
 
 if __name__ == "__main__":
     if not os.path.exists("downloads"): os.makedirs("downloads")
-    logger.info("AURA Ultra-Premium Bot Started!")
+    logger.info("AURA Enterprise Bot Started!")
     bot.infinity_polling()
