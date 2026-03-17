@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 8037371175 # Main Owner ID
+OWNER_ID = 8651895707 # Main Owner ID
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
