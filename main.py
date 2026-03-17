@@ -79,7 +79,6 @@ class RedeemCode(Base):
     is_used = Column(Boolean, default=False)
 
 # DATABASE SAFETY: Drop all bondho kora holo jate data na haray
-Base.metadata.drop_all(engine)
 Base.metadata.create_all(engine)
 
 def get_user(db, user_id, user_name="User", referrer_id=None):
