@@ -119,11 +119,9 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
 def daily_tasks():
     db = SessionLocal()
     try:
-        # Reset Limits
         db.query(User).update({User.daily_downloads: 0})
         db.commit()
         
-        # Auto DB Backup to Owner
         users = db.query(User).all()
         csv_data = StringIO()
         writer = csv.writer(csv_data)
@@ -803,7 +801,7 @@ def broadcast_cmd(message):
     db.close()
     bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success} users.")
 
-# --- CORE DOWNLOADER (YT/SHORTS FIXED & 2GB READY) ---
+# --- CORE DOWNLOADER (EXACT QUALITY / SHORTS FIX) ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
     user_id = message.from_user.id
@@ -876,6 +874,7 @@ def process_dl(call):
     if user.role in ['diamond', 'owner']:
         max_size = 2000 * 1024 * 1024 
 
+    # 🚀 EXACT QUALITY FIX (No FFmpeg Merging required)
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
         'max_filesize': max_size,
@@ -885,7 +884,7 @@ def process_dl(call):
     }
     
     if dl_type == 'vid': 
-        ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' 
+        ydl_opts['format'] = 'best[ext=mp4]/best' 
     elif dl_type == 'aud': 
         ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
     elif dl_type == 'thumb': 
