@@ -78,7 +78,6 @@ class RedeemCode(Base):
     expires_at = Column(DateTime, nullable=True) 
     is_used = Column(Boolean, default=False)
 
-# DATABASE SAFETY: Drop all bondho kora holo jate data na haray
 Base.metadata.create_all(engine)
 
 def get_user(db, user_id, user_name="User", referrer_id=None):
@@ -156,11 +155,13 @@ def get_bottom_keyboard():
     )
     return markup
 
+# 🔄 EKHANE NOTUN SIMPLIFIED MENU
 def get_inline_menu(msg_id):
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🎬 1080p", callback_data=f"dl|1080|{msg_id}"), InlineKeyboardButton("🎬 720p", callback_data=f"dl|720|{msg_id}"))
-    markup.row(InlineKeyboardButton("🎵 Audio", callback_data=f"dl|aud|{msg_id}"), InlineKeyboardButton("🖼 Thumb", callback_data=f"dl|thumb|{msg_id}"))
-    markup.row(InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
+    markup.row(InlineKeyboardButton("🎬 Video", callback_data=f"dl|vid|{msg_id}"),
+               InlineKeyboardButton("🎵 Audio", callback_data=f"dl|aud|{msg_id}"))
+    markup.row(InlineKeyboardButton("🖼 Thumb", callback_data=f"dl|thumb|{msg_id}"),
+               InlineKeyboardButton("❌ Cancel", callback_data="cancel"))
     return markup
 
 # --- USER COMMANDS ---
@@ -638,23 +639,23 @@ def handle_link(message):
     msg_id = message.message_id
     url_storage[msg_id] = url
     
-    # Platform Detector
     platform = "Video"
     if "youtube.com" in url or "youtu.be" in url: platform = "YouTube"
     elif "facebook.com" in url or "fb.watch" in url: platform = "Facebook"
     elif "tiktok.com" in url: platform = "TikTok"
     elif "instagram.com" in url: platform = "Instagram"
 
-    bot.reply_to(message, f"🔗 **{platform} Link Analyzed!**\nChoose format & quality:", reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
+    bot.reply_to(message, f"🔗 **{platform} Link Analyzed!**\nChoose format:", reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
 def cancel_action(call):
     bot.delete_message(call.message.chat.id, call.message.message_id)
 
+# 🔄 EKHANE NOTUN SIMPLIFIED DOWNLOAD LOGIC (NO 1080/720 MERGE ERRORS)
 @bot.callback_query_handler(func=lambda call: call.data.startswith('dl|'))
 def process_dl(call):
     parts = call.data.split('|')
-    dl_type = parts[1]
+    dl_type = parts[1] # Ekhon sudhu 'vid', 'aud', 'thumb' hobe
     msg_id = int(parts[2])
     url = url_storage.get(msg_id)
     
@@ -667,9 +668,8 @@ def process_dl(call):
         db.close()
         return bot.answer_callback_query(call.id, "❌ Limit Exceeded! Get subscriptions.", show_alert=True)
 
-    msg = bot.edit_message_text("⏳ Extracting video data...", call.message.chat.id, call.message.message_id)
+    msg = bot.edit_message_text("⏳ Extracting data...", call.message.chat.id, call.message.message_id)
 
-    # Pre-deduct limit (will refund if failed)
     if user.role != 'owner': 
         user.daily_downloads += 1
     user.total_downloads += 1
@@ -677,15 +677,19 @@ def process_dl(call):
 
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
-        'max_filesize': 50 * 1024 * 1024,
+        'max_filesize': 50 * 1024 * 1024, # 50MB telegram limit
         'quiet': True, 'noplaylist': True,
         'http_headers': {'User-Agent': 'Mozilla/5.0'}
     }
     
-    if dl_type == '1080': ydl_opts['format'] = 'bestvideo[height<=1080]+bestaudio/best'
-    elif dl_type == '720': ydl_opts['format'] = 'bestvideo[height<=720]+bestaudio/best'
-    elif dl_type == 'aud': ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
-    elif dl_type == 'thumb': ydl_opts['skip_download'] = True; ydl_opts['writethumbnail'] = True
+    # Simple Format Selection (No merging needed = No errors)
+    if dl_type == 'vid': 
+        ydl_opts['format'] = 'best[ext=mp4]/best' 
+    elif dl_type == 'aud': 
+        ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
+    elif dl_type == 'thumb': 
+        ydl_opts['skip_download'] = True
+        ydl_opts['writethumbnail'] = True
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -699,14 +703,14 @@ def process_dl(call):
                 return
 
             downloaded_files = glob.glob(f'downloads/{info["id"]}_{user.id}.*')
-            if not downloaded_files: raise Exception("File save hoyni")
+            if not downloaded_files: raise Exception("File not saved")
             path = downloaded_files[0]
 
             if os.path.exists(path):
                 if os.path.getsize(path) / (1024 * 1024) > 49.5:
-                    raise Exception("Video is larger than 50MB Telegram limit!")
+                    raise Exception("File too large")
 
-                bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type in ['1080', '720'] else 'upload_document')
+                bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
                 with open(path, 'rb') as file:
                     if dl_type == 'aud': bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA**")
                     else: bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**")
@@ -714,7 +718,7 @@ def process_dl(call):
                 
     except Exception as e:
         logger.error(f"DL Error: {e}")
-        # Auto-Refund Logic
+        # Auto Refund
         if user.role != 'owner' and user.daily_downloads > 0:
             user.daily_downloads -= 1
         user.total_downloads -= 1
