@@ -6,19 +6,21 @@ import logging
 import glob
 import csv
 import random
-try:
-    import psutil
-except ImportError:
-    os.system("pip install psutil")
-    import psutil
 from io import StringIO
 from datetime import datetime, timedelta
+
 import yt_dlp
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteger, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
+
+try:
+    import psutil
+except ImportError:
+    os.system("pip install psutil")
+    import psutil
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -130,11 +132,11 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
 def daily_tasks():
     db = SessionLocal()
     try:
-        # Limit Reset
+        # Reset daily downloads
         db.query(User).update({User.daily_downloads: 0})
         db.commit()
         
-        # Daily DB Backup for Owner
+        # Auto Backup System
         users = db.query(User).all()
         csv_data = StringIO()
         writer = csv.writer(csv_data)
@@ -142,6 +144,7 @@ def daily_tasks():
         for u in users:
             writer.writerow([u.id, u.name, u.role, u.total_downloads, u.join_date.strftime("%Y-%m-%d")])
         csv_data.seek(0)
+        
         try:
             bot.send_document(OWNER_ID, ('aura_backup.csv', csv_data.getvalue()), caption="💾 **Daily Auto-Backup**", parse_mode="Markdown")
         except:
@@ -175,6 +178,7 @@ def prevent_unauthorized_groups(message: ChatMemberUpdated):
 def check_force_sub(user_id):
     if not FORCE_CHANNELS or user_id == OWNER_ID:
         return True
+    
     for ch in FORCE_CHANNELS:
         try:
             status = bot.get_chat_member(ch, user_id).status
@@ -182,6 +186,7 @@ def check_force_sub(user_id):
                 return False
         except:
             return False
+            
     return True
 
 def clean_url(url):
@@ -190,16 +195,27 @@ def clean_url(url):
     return url
 
 # --- UI MENUS ---
-def get_bottom_keyboard():
+def get_bottom_keyboard(user_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(
-        KeyboardButton("👤 Profile"), 
-        KeyboardButton("💎 Get Subscriptions"),
-        KeyboardButton("🏆 Leaderboard"), 
-        KeyboardButton("🎁 Invite & Earn"),
-        KeyboardButton("🎁 Daily Claim"), 
-        KeyboardButton("ℹ️ Help & Rules")
-    )
+    
+    if user_id == OWNER_ID:
+        markup.add(
+            KeyboardButton("👤 Profile"), 
+            KeyboardButton("💎 Get Subscriptions"),
+            KeyboardButton("🏆 Leaderboard"), 
+            KeyboardButton("🎁 Invite & Earn"),
+            KeyboardButton("🎁 Daily Claim"), 
+            KeyboardButton("ℹ️ Help & Rules")
+        )
+    else:
+        markup.add(
+            KeyboardButton("👤 Profile"), 
+            KeyboardButton("💎 Get Subscriptions"),
+            KeyboardButton("🎁 Invite & Earn"), 
+            KeyboardButton("🎁 Daily Claim"),
+            KeyboardButton("ℹ️ Help & Rules")
+        )
+        
     return markup
 
 def get_inline_menu(msg_id):
@@ -271,7 +287,13 @@ def start_cmd(message):
     text += f"👥 **Community:** `{total_users} Users`\n\n"
     text += f"👨‍💻 **DEV :** [Ononto Hasan](https://www.facebook.com/yours.ononto)"
 
-    bot.send_message(message.chat.id, text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown", disable_web_page_preview=True)
+    bot.send_message(
+        message.chat.id, 
+        text, 
+        reply_markup=get_bottom_keyboard(message.from_user.id), 
+        parse_mode="Markdown", 
+        disable_web_page_preview=True
+    )
 
     if message.from_user.id == OWNER_ID:
         cpu = psutil.cpu_percent()
@@ -301,6 +323,7 @@ def lucky_spin_cmd(message):
     user.last_spin = datetime.now()
     bot.reply_to(message, "🎰 **Spinning the wheel...**")
     time.sleep(1.5)
+    
     chance = random.randint(1, 100)
     
     if chance <= 10:
@@ -325,6 +348,7 @@ def lucky_spin_cmd(message):
 def bottom_menu_handler(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID:
         return
+        
     db = SessionLocal()
     user = get_user(db, message.from_user.id, message.from_user.first_name)
     
@@ -350,8 +374,12 @@ def bottom_menu_handler(message):
         bot.reply_to(message, text, reply_markup=markup, parse_mode="Markdown")
             
     elif message.text == "🏆 Leaderboard":
+        if message.from_user.id != OWNER_ID:
+            db.close()
+            return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+            
         top = db.query(User).order_by(User.total_downloads.desc()).limit(5).all()
-        text = "🏆 **Top AURA Users**\n\n"
+        text = "🏆 **Top AURA Users (Admin Only)**\n\n"
         for i, u in enumerate(top): 
             r_str = "OWNER" if u.role == 'owner' else u.role.upper()
             text += f"{i+1}. {u.name} (`{u.id}`) - **{r_str}** - 📥 {u.total_downloads}\n"
@@ -384,9 +412,11 @@ def bottom_menu_handler(message):
 def settings_cmd(message):
     db = SessionLocal()
     user = get_user(db, message.from_user.id)
+    
     status = "ON 🟢" if user.auto_delete else "OFF 🔴"
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton(f"Auto-Delete Messages: {status}", callback_data=f"set_autodel|{user.id}"))
+    
     bot.reply_to(message, "⚙️ **User Settings**\nConfigure your AURA experience:", reply_markup=markup, parse_mode="Markdown")
     db.close()
 
@@ -395,6 +425,7 @@ def toggle_auto_delete(call):
     db = SessionLocal()
     user_id = int(call.data.split('|')[1])
     user = get_user(db, user_id)
+    
     user.auto_delete = not user.auto_delete
     db.commit()
     
@@ -416,6 +447,7 @@ def process_payment_ss(message):
     if not message.photo:
         bot.reply_to(message, "❌ Eita screenshot noy. Abar 'Get Subscriptions' theke 'Verify Payment' e click kore chobi din.")
         return
+        
     file_id = message.photo[-1].file_id
     msg = bot.reply_to(message, "✅ Screenshot peyechi. Ebar apnar **TrxID (Transaction ID)** ba je number theke taka pathiyechen seta likhe send korun.")
     bot.register_next_step_handler(msg, process_payment_trxid, file_id)
@@ -519,6 +551,7 @@ def generate_code_cmd(message):
         role = parts[1].lower()
         if role not in ['silver', 'gold', 'diamond']: 
             raise ValueError
+            
         hours = int(parts[2])
         expires_at = datetime.now() + timedelta(hours=hours)
         
@@ -554,6 +587,7 @@ def generate_code_cmd(message):
 def redeem_cmd(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID:
         return
+        
     parts = message.text.split()
     if len(parts) < 2:
         return bot.reply_to(message, "Use: `/redeem AURA-CODE`")
@@ -586,22 +620,26 @@ def redeem_cmd(message):
         c.is_used = True
         db.commit()
         bot.reply_to(message, f"✅ **Success!**\nApni ekhon **{c.role_granted.capitalize()}** plan e achen 24 ghontar jonno.")
+        
     db.close()
 
 @bot.message_handler(commands=['gift'])
 def gift_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     try:
         parts = message.text.split()
         user_id = int(parts[1])
         role = parts[2].lower()
         days = int(parts[3])
+        
         if role not in LIMITS.keys(): 
             raise ValueError
         
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
+        
         if u:
             u.role = role
             u.role_expires_at = datetime.now() + timedelta(days=days)
@@ -611,6 +649,7 @@ def gift_cmd(message):
             bot.send_message(user_id, f"🎁 **Gift Received!**\nAdmin has gifted you **{role.capitalize()}** for {days} days. Enjoy!")
         else:
             bot.reply_to(message, "❌ User not found.")
+            
         db.close()
     except:
         bot.reply_to(message, "Use: `/gift [ID] [role] [days]`", parse_mode="Markdown")
@@ -619,6 +658,7 @@ def gift_cmd(message):
 def ping_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     start_time = time.time()
     msg = bot.reply_to(message, "Pinging...")
     end_time = time.time()
@@ -628,6 +668,7 @@ def ping_cmd(message):
 def admin_panel(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     markup = InlineKeyboardMarkup()
     markup.row(
         InlineKeyboardButton("📊 System Stats", callback_data="admin_stats"), 
@@ -639,6 +680,7 @@ def admin_panel(message):
 def admin_callbacks(call):
     if call.from_user.id != OWNER_ID:
         return bot.answer_callback_query(call.id, "🚫 UNAUTHORIZED!", show_alert=True)
+        
     action = call.data.split('_')[1]
     
     if action == "stats":
@@ -646,6 +688,7 @@ def admin_callbacks(call):
         users = db.query(User).count()
         dls = sum([u.total_downloads for u in db.query(User).all()])
         db.close()
+        
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
         text = f"📊 **System Stats**\n👥 Users: {users}\n📥 Downloads: {dls}\n🖥 CPU: {cpu}% | RAM: {ram}%"
@@ -668,11 +711,13 @@ def admin_callbacks(call):
 def search_user(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     try:
         user_id = int(message.text.split()[1])
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
         db.close()
+        
         if u:
             bot.reply_to(message, f"🔍 **User Details:**\nName: {u.name}\nID: `{u.id}`\nRole: {u.role}\nTotal DLs: {u.total_downloads}\nBanned: {u.is_banned}", parse_mode="Markdown")
         else:
@@ -684,17 +729,21 @@ def search_user(message):
 def ban_unban_user(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     try:
         cmd = message.text.split()[0].replace('/', '')
         user_id = int(message.text.split()[1])
+        
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
+        
         if u:
             u.is_banned = (cmd == 'ban')
             db.commit()
             bot.reply_to(message, f"✅ User {user_id} is now {cmd}ned.")
         else:
             bot.reply_to(message, "❌ User not found.")
+            
         db.close()
     except:
         bot.reply_to(message, "Use: `/ban [ID]` or `/unban [ID]`")
@@ -703,6 +752,7 @@ def ban_unban_user(message):
 def set_role_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     try:
         parts = message.text.split()
         user_id = int(parts[1])
@@ -712,6 +762,7 @@ def set_role_cmd(message):
         
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
+        
         if u:
             u.role = role
             u.role_expires_at = datetime.now() + timedelta(days=30)
@@ -721,6 +772,7 @@ def set_role_cmd(message):
             bot.send_message(user_id, f"🎉 Admin has upgraded your account to **{role.capitalize()}**!")
         else:
             bot.reply_to(message, "❌ User not found.")
+            
         db.close()
     except:
         bot.reply_to(message, "Use: `/setrole [ID] [role]`", parse_mode="Markdown")
@@ -729,12 +781,15 @@ def set_role_cmd(message):
 def add_limit_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     try:
         parts = message.text.split()
         user_id = int(parts[1])
         amount = int(parts[2])
+        
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
+        
         if u:
             u.daily_downloads = max(0, u.daily_downloads - amount)
             db.commit()
@@ -742,6 +797,7 @@ def add_limit_cmd(message):
             bot.send_message(user_id, f"🎁 Admin has given you {amount} extra downloads for today!")
         else:
             bot.reply_to(message, "❌ User not found.")
+            
         db.close()
     except:
         bot.reply_to(message, "Use: `/addlimit [ID] [amount]`", parse_mode="Markdown")
@@ -750,12 +806,14 @@ def add_limit_cmd(message):
 def export_db_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     db = SessionLocal()
     users = db.query(User).all()
     
     csv_data = StringIO()
     writer = csv.writer(csv_data)
     writer.writerow(['ID', 'Name', 'Role', 'Total DLs', 'Join Date'])
+    
     for u in users:
         writer.writerow([u.id, u.name, u.role, u.total_downloads, u.join_date.strftime("%Y-%m-%d")])
     
@@ -767,10 +825,12 @@ def export_db_cmd(message):
 def direct_msg_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     try:
         parts = message.text.split(' ', 2)
         target_id = int(parts[1])
         text = parts[2]
+        
         bot.send_message(target_id, f"📩 **Message from Admin:**\n\n{text}", parse_mode="Markdown")
         bot.reply_to(message, "✅ Message sent.")
     except:
@@ -780,6 +840,7 @@ def direct_msg_cmd(message):
 def send_ad_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     try:
         parts = message.text.split('|')
         text = parts[0].replace('/sendad ', '').strip()
@@ -787,6 +848,7 @@ def send_ad_cmd(message):
         btn_url = parts[2].strip()
         
         markup = InlineKeyboardMarkup().add(InlineKeyboardButton(btn_text, url=btn_url))
+        
         db = SessionLocal()
         users = db.query(User).all()
         
@@ -798,6 +860,7 @@ def send_ad_cmd(message):
                 time.sleep(0.05)
             except:
                 pass
+                
         db.close()
         bot.reply_to(message, f"✅ Ad sent to {success} users.")
     except:
@@ -807,6 +870,7 @@ def send_ad_cmd(message):
 def broadcast_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     msg_text = message.text.replace('/broadcast', '').strip()
     if not msg_text:
         return bot.reply_to(message, "⚠️ Eivabe likhun: `/broadcast Hello!`", parse_mode="Markdown")
@@ -823,15 +887,18 @@ def broadcast_cmd(message):
             time.sleep(0.05)
         except:
             pass
+            
     db.close()
     bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success} users.")
 
-# --- CORE DOWNLOADER (YT/SHORTS FIXED & 2GB READY) ---
+# --- CORE DOWNLOADER (EXACT QUALITY / SHORTS FIX) ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
     user_id = message.from_user.id
+    
     if MAINTENANCE and user_id != OWNER_ID:
         return
+        
     if not check_force_sub(user_id):
         return bot.reply_to(message, "⚠️ Join channel first.")
 
@@ -905,7 +972,9 @@ def process_dl(call):
         'max_filesize': max_size,
         'quiet': True,
         'noplaylist': True,
-        'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
     }
     
     if dl_type == 'vid': 
@@ -930,8 +999,10 @@ def process_dl(call):
                 return
 
             downloaded_files = glob.glob(f'downloads/{info["id"]}_{user.id}.*')
+            
             if not downloaded_files:
                 raise Exception("File not saved")
+                
             path = downloaded_files[0]
 
             if os.path.exists(path):
@@ -960,6 +1031,7 @@ def process_dl(call):
         logger.error(f"DL Error: {e}")
         if user.role != 'owner' and user.daily_downloads > 0:
             user.daily_downloads -= 1
+            
         user.total_downloads -= 1
         db.commit()
         
