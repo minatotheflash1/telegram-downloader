@@ -1030,7 +1030,7 @@ def support_ticket(message):
     except:
         pass
 
-# --- CORE DOWNLOADER (Universal Fix: Pinterest, YT, FB, TikTok, IG) ---
+# --- CORE DOWNLOADER (Universal Fix: No FFMPEG required) ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
     user_id = message.from_user.id
@@ -1114,11 +1114,13 @@ def process_dl(call):
     if user.role in ['diamond', 'owner']:
         max_size = 2000 * 1024 * 1024 
 
-    # 🚀 UNIVERSAL FORMAT FIX (Pinterest, FB, IG, YT, TikTok support)
-    format_string = 'best[ext=mp4]/best/b/bestvideo+bestaudio' 
-    
+    # 🚀 NO FFMPEG FIX: Only download pre-merged single files. 
+    # 'best' gets the highest quality format that contains both video and audio.
+    # 'b' is a fallback for the best single file.
     if dl_type == 'aud':
-        format_string = 'bestaudio[ext=m4a]/bestaudio/best/b'
+        format_string = 'm4a/bestaudio/best/b'
+    else:
+        format_string = 'best[ext=mp4]/b[ext=mp4]/best/b'
 
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
@@ -1158,7 +1160,7 @@ def process_dl(call):
             downloaded_files = glob.glob(f'downloads/{info["id"]}_{user.id}.*')
             
             if not downloaded_files:
-                raise Exception("File not saved. Server block or Private link.")
+                raise Exception("File not saved. Download stream was broken.")
                 
             path = downloaded_files[0]
 
@@ -1168,10 +1170,10 @@ def process_dl(call):
                 if file_size > 49.5 and not USE_LOCAL_SERVER:
                     raise Exception("File too large for Public API (50MB Limit).")
 
-                bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
+                bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type in ['vid', '4k'] else 'upload_document')
                 with open(path, 'rb') as file:
                     file_ext = path.split('.')[-1].lower()
-                    # Smart logic for Pinterest Images
+                    
                     if file_ext in ['jpg', 'jpeg', 'png', 'webp']:
                         bot.send_photo(call.message.chat.id, file, caption="⚡ **AURA Downloader**")
                     elif dl_type == 'aud': 
