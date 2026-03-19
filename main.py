@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 8037371175  # APNAR ADMIN ID
+OWNER_ID = 8037371175  # Apnar Main Admin ID
 DATABASE_URL = os.getenv("DATABASE_URL")
 FORCE_CHANNELS = [] 
 
@@ -1030,7 +1030,7 @@ def support_ticket(message):
     except:
         pass
 
-# --- CORE DOWNLOADER (Universal Fix Without FFmpeg) ---
+# --- CORE DOWNLOADER (Universal Fix: Pinterest, YT, FB, TikTok, IG) ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
     user_id = message.from_user.id
@@ -1046,7 +1046,6 @@ def handle_link(message):
         return bot.reply_to(message, "🐢 **Too fast!** Please wait 3 seconds.", parse_mode="Markdown")
     user_cooldowns[user_id] = now
 
-    # Feature: Spam Auto-Ban Tracker
     spam_tracker[user_id] = spam_tracker.get(user_id, 0) + 1
     if spam_tracker[user_id] > 10:
         db = SessionLocal()
@@ -1115,10 +1114,11 @@ def process_dl(call):
     if user.role in ['diamond', 'owner']:
         max_size = 2000 * 1024 * 1024 
 
-    format_string = 'best[ext=mp4]/best'
+    # 🚀 UNIVERSAL FORMAT FIX (Pinterest, FB, IG, YT, TikTok support)
+    format_string = 'best[ext=mp4]/best/b/bestvideo+bestaudio' 
     
     if dl_type == 'aud':
-        format_string = 'bestaudio[ext=m4a]/bestaudio/best'
+        format_string = 'bestaudio[ext=m4a]/bestaudio/best/b'
 
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
@@ -1129,10 +1129,12 @@ def process_dl(call):
         'ignoreerrors': False,
         'noplaylist': True,
         'format': format_string,
-        'extractor_args': {'youtube': ['player_client=android,ios']} # Fix for YouTube block
+        'extractor_args': {'youtube': ['player_client=android,ios']}, 
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
+        }
     }
     
-    # ⚠️ Check if admin uploaded cookies for youtube block bypass
     if os.path.exists('cookies.txt'):
         ydl_opts['cookiefile'] = 'cookies.txt'
 
@@ -1168,7 +1170,11 @@ def process_dl(call):
 
                 bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
                 with open(path, 'rb') as file:
-                    if dl_type == 'aud': 
+                    file_ext = path.split('.')[-1].lower()
+                    # Smart logic for Pinterest Images
+                    if file_ext in ['jpg', 'jpeg', 'png', 'webp']:
+                        bot.send_photo(call.message.chat.id, file, caption="⚡ **AURA Downloader**")
+                    elif dl_type == 'aud': 
                         bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA**")
                     else: 
                         bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**")
