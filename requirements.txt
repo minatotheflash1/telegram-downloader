@@ -4,3 +4,4 @@ yt-dlp
 SQLAlchemy
 apscheduler
 psutil
+flask
