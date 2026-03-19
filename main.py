@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-OWNER_ID = 8651895707  # Apnar Main Admin ID
+OWNER_ID = 8037371175  # Apnar Main Admin ID
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -1957,4 +1957,3 @@ if __name__ == "__main__":
     logger.info("AURA Enterprise Bot Started!")
 
     bot.infinity_polling()
-
