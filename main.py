@@ -6,13 +6,9 @@ import logging
 import glob
 import csv
 import random
-try:
-    import psutil
-except ImportError:
-    os.system("pip install psutil")
-    import psutil
 from io import StringIO
 from datetime import datetime, timedelta
+
 import yt_dlp
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated
@@ -20,13 +16,19 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteg
 from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 
+try:
+    import psutil
+except ImportError:
+    os.system("pip install psutil")
+    import psutil
+
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 8037371175  # Apnar Main Admin ID
+OWNER_ID = 8037371175  # APNAR ADMIN ID
 DATABASE_URL = os.getenv("DATABASE_URL")
 FORCE_CHANNELS = [] 
 
@@ -132,10 +134,14 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
 def daily_tasks():
     db = SessionLocal()
     try:
+        # Reset Limits
         db.query(User).update({User.daily_downloads: 0})
+        
+        # Auto DB Cleaner (Delete expired codes)
         db.query(RedeemCode).filter(RedeemCode.expires_at < datetime.now()).delete()
         db.commit()
         
+        # Daily DB Backup to Admin
         users = db.query(User).all()
         csv_data = StringIO()
         writer = csv.writer(csv_data)
@@ -186,8 +192,8 @@ def check_force_sub(user_id):
     return True
 
 def clean_url(url):
-    # CapCut removed, tracking tags only cleaned for IG and TikTok
-    if '?' in url and ('instagram.com' in url or 'tiktok.com' in url):
+    # Added Pinterest, IG, TikTok url cleaner
+    if '?' in url and any(domain in url for domain in ['instagram.com', 'tiktok.com', 'pin.it', 'pinterest.com']):
         return url.split('?')[0]
     return url
 
@@ -211,7 +217,7 @@ def get_bottom_keyboard(user_id):
 def get_inline_menu(msg_id):
     markup = InlineKeyboardMarkup()
     markup.row(
-        InlineKeyboardButton("🎬 Video (Auto)", callback_data=f"dl|vid|{msg_id}"),
+        InlineKeyboardButton("🎬 Video", callback_data=f"dl|vid|{msg_id}"),
         InlineKeyboardButton("🎵 Audio", callback_data=f"dl|aud|{msg_id}")
     )
     markup.row(
@@ -1109,8 +1115,7 @@ def process_dl(call):
     if user.role in ['diamond', 'owner']:
         max_size = 2000 * 1024 * 1024 
 
-    # 🚀 UNIVERSAL FIX: Use basic 'best' which downloads a pre-merged mp4 file for all platforms without needing ffmpeg.
-    format_string = 'best[ext=mp4]/best' 
+    format_string = 'best[ext=mp4]/best'
     
     if dl_type == 'aud':
         format_string = 'bestaudio[ext=m4a]/bestaudio/best'
@@ -1124,11 +1129,13 @@ def process_dl(call):
         'ignoreerrors': False,
         'noplaylist': True,
         'format': format_string,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
-        }
+        'extractor_args': {'youtube': ['player_client=android,ios']} # Fix for YouTube block
     }
     
+    # ⚠️ Check if admin uploaded cookies for youtube block bypass
+    if os.path.exists('cookies.txt'):
+        ydl_opts['cookiefile'] = 'cookies.txt'
+
     if dl_type == 'thumb': 
         ydl_opts['skip_download'] = True
         ydl_opts['writethumbnail'] = True
@@ -1149,7 +1156,7 @@ def process_dl(call):
             downloaded_files = glob.glob(f'downloads/{info["id"]}_{user.id}.*')
             
             if not downloaded_files:
-                raise Exception("File not saved. Download stream was broken.")
+                raise Exception("File not saved. Server block or Private link.")
                 
             path = downloaded_files[0]
 
@@ -1159,7 +1166,7 @@ def process_dl(call):
                 if file_size > 49.5 and not USE_LOCAL_SERVER:
                     raise Exception("File too large for Public API (50MB Limit).")
 
-                bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type in ['vid', '4k'] else 'upload_document')
+                bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
                 with open(path, 'rb') as file:
                     if dl_type == 'aud': 
                         bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA**")
