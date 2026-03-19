@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 8651895707  # Apnar Main Admin ID
+OWNER_ID = 8037371175  # Apnar Main Admin ID
 DATABASE_URL = os.getenv("DATABASE_URL")
 FORCE_CHANNELS = [] 
 
@@ -185,7 +185,7 @@ def check_force_sub(user_id):
     return True
 
 def clean_url(url):
-    if '?' in url and ('instagram.com' in url or 'tiktok.com' in url):
+    if '?' in url and ('instagram.com' in url or 'tiktok.com' in url or 'capcut.com' in url):
         return url.split('?')[0]
     return url
 
@@ -687,14 +687,17 @@ def ban_unban_user(message):
     try:
         cmd = message.text.split()[0].replace('/', '')
         user_id = int(message.text.split()[1])
+        
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
+        
         if u:
             u.is_banned = (cmd == 'ban')
             db.commit()
             bot.reply_to(message, f"✅ User {user_id} is now {cmd}ned.")
         else:
             bot.reply_to(message, "❌ User not found.")
+            
         db.close()
     except:
         bot.reply_to(message, "Use: `/ban [ID]` or `/unban [ID]`")
@@ -712,6 +715,7 @@ def set_role_cmd(message):
         
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
+        
         if u:
             u.role = role
             u.role_expires_at = datetime.now() + timedelta(days=30)
@@ -721,6 +725,7 @@ def set_role_cmd(message):
             bot.send_message(user_id, f"🎉 Admin has upgraded your account to **{role.capitalize()}**!")
         else:
             bot.reply_to(message, "❌ User not found.")
+            
         db.close()
     except:
         bot.reply_to(message, "Use: `/setrole [ID] [role]`", parse_mode="Markdown")
@@ -733,8 +738,10 @@ def add_limit_cmd(message):
         parts = message.text.split()
         user_id = int(parts[1])
         amount = int(parts[2])
+        
         db = SessionLocal()
         u = db.query(User).filter(User.id == user_id).first()
+        
         if u:
             u.daily_downloads = max(0, u.daily_downloads - amount)
             db.commit()
@@ -742,6 +749,7 @@ def add_limit_cmd(message):
             bot.send_message(user_id, f"🎁 Admin has given you {amount} extra downloads for today!")
         else:
             bot.reply_to(message, "❌ User not found.")
+            
         db.close()
     except:
         bot.reply_to(message, "Use: `/addlimit [ID] [amount]`", parse_mode="Markdown")
@@ -750,12 +758,14 @@ def add_limit_cmd(message):
 def export_db_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+        
     db = SessionLocal()
     users = db.query(User).all()
     
     csv_data = StringIO()
     writer = csv.writer(csv_data)
     writer.writerow(['ID', 'Name', 'Role', 'Total DLs', 'Join Date'])
+    
     for u in users:
         writer.writerow([u.id, u.name, u.role, u.total_downloads, u.join_date.strftime("%Y-%m-%d")])
     
@@ -771,6 +781,7 @@ def direct_msg_cmd(message):
         parts = message.text.split(' ', 2)
         target_id = int(parts[1])
         text = parts[2]
+        
         bot.send_message(target_id, f"📩 **Message from Admin:**\n\n{text}", parse_mode="Markdown")
         bot.reply_to(message, "✅ Message sent.")
     except:
@@ -787,6 +798,7 @@ def send_ad_cmd(message):
         btn_url = parts[2].strip()
         
         markup = InlineKeyboardMarkup().add(InlineKeyboardButton(btn_text, url=btn_url))
+        
         db = SessionLocal()
         users = db.query(User).all()
         
@@ -798,6 +810,7 @@ def send_ad_cmd(message):
                 time.sleep(0.05)
             except:
                 pass
+                
         db.close()
         bot.reply_to(message, f"✅ Ad sent to {success} users.")
     except:
@@ -823,6 +836,7 @@ def broadcast_cmd(message):
             time.sleep(0.05)
         except:
             pass
+            
     db.close()
     bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success} users.")
 
