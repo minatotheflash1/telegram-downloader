@@ -3,8 +3,8 @@ import telebot
 from yt_dlp import YoutubeDL
 
 # আপনার টোকেন এবং এডমিন আইডি
-API_TOKEN = 'YOUR_BOT_TOKEN'
-ADMIN_ID = 8037371175 # আপনার নতুন আপডেট করা এডমিন আইডি
+API_TOKEN = '8607967545:AAHBB_jUS1vpyPbJmPgMtYgNlSZEAJVR7qo'
+ADMIN_ID = 8651895707 # আপনার নতুন আপডেট করা এডমিন আইডি
 bot = telebot.TeleBot(API_TOKEN)
 
 def download_video(url, user_id):
