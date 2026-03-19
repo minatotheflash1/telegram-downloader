@@ -6,21 +6,19 @@ import logging
 import glob
 import csv
 import random
+try:
+    import psutil
+except ImportError:
+    os.system("pip install psutil")
+    import psutil
 from io import StringIO
 from datetime import datetime, timedelta
-
 import yt_dlp
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, BigInteger, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
-
-try:
-    import psutil
-except ImportError:
-    os.system("pip install psutil")
-    import psutil
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -134,23 +132,20 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
 def daily_tasks():
     db = SessionLocal()
     try:
-        # Reset Limits
+        # Limit Reset
         db.query(User).update({User.daily_downloads: 0})
-        
-        # Auto DB Cleaner (Delete expired codes)
-        db.query(RedeemCode).filter(RedeemCode.expires_at < datetime.now()).delete()
         db.commit()
         
-        # Daily DB Backup to Admin
+        # Daily DB Backup for Owner
         users = db.query(User).all()
         csv_data = StringIO()
         writer = csv.writer(csv_data)
-        writer.writerow(['ID', 'Name', 'Role', 'DLs', 'Warns', 'Joined'])
+        writer.writerow(['ID', 'Name', 'Role', 'Total DLs', 'Warns', 'Join Date'])
         for u in users:
             writer.writerow([u.id, u.name, u.role, u.total_downloads, u.warnings, u.join_date.strftime("%Y-%m-%d")])
         csv_data.seek(0)
         try:
-            bot.send_document(OWNER_ID, ('aura_backup.csv', csv_data.getvalue()), caption="💾 **Daily Auto-Backup & Clean**", parse_mode="Markdown")
+            bot.send_document(OWNER_ID, ('aura_backup.csv', csv_data.getvalue()), caption="💾 **Daily Auto-Backup**", parse_mode="Markdown")
         except:
             pass
     finally:
@@ -192,7 +187,6 @@ def check_force_sub(user_id):
     return True
 
 def clean_url(url):
-    # Added Pinterest, IG, TikTok url cleaner
     if '?' in url and any(domain in url for domain in ['instagram.com', 'tiktok.com', 'pin.it', 'pinterest.com']):
         return url.split('?')[0]
     return url
@@ -1114,13 +1108,12 @@ def process_dl(call):
     if user.role in ['diamond', 'owner']:
         max_size = 2000 * 1024 * 1024 
 
-    # 🚀 NO FFMPEG FIX: Only download pre-merged single files. 
-    # 'best' gets the highest quality format that contains both video and audio.
-    # 'b' is a fallback for the best single file.
+    # 🚀 THE ULTIMATE NO-FFMPEG UNIVERSAL FORMAT
     if dl_type == 'aud':
-        format_string = 'm4a/bestaudio/best/b'
+        format_string = 'bestaudio[ext=m4a]/bestaudio/b'
     else:
-        format_string = 'best[ext=mp4]/b[ext=mp4]/best/b'
+        # 'b' ensures a single pre-merged file. 'best' is the fallback.
+        format_string = 'b/best'
 
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
