@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 8651895707  # Apnar Main Admin ID
+OWNER_ID = 8037371175  # Apnar Main Admin ID
 DATABASE_URL = os.getenv("DATABASE_URL")
 FORCE_CHANNELS = [] 
 
@@ -44,6 +44,7 @@ MAINTENANCE = False
 MAINTENANCE_MSG = "🛠 **Bot under maintenance. Please wait.**"
 url_storage = {}
 user_cooldowns = {}
+spam_tracker = {}
 
 LIMITS = {
     'free': 5, 
@@ -131,20 +132,19 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
 def daily_tasks():
     db = SessionLocal()
     try:
-        # Limit Reset
         db.query(User).update({User.daily_downloads: 0})
+        db.query(RedeemCode).filter(RedeemCode.expires_at < datetime.now()).delete()
         db.commit()
         
-        # Daily DB Backup for Owner
         users = db.query(User).all()
         csv_data = StringIO()
         writer = csv.writer(csv_data)
-        writer.writerow(['ID', 'Name', 'Role', 'Total DLs', 'Warns', 'Join Date'])
+        writer.writerow(['ID', 'Name', 'Role', 'DLs', 'Warns', 'Joined'])
         for u in users:
             writer.writerow([u.id, u.name, u.role, u.total_downloads, u.warnings, u.join_date.strftime("%Y-%m-%d")])
         csv_data.seek(0)
         try:
-            bot.send_document(OWNER_ID, ('aura_backup.csv', csv_data.getvalue()), caption="💾 **Daily Auto-Backup**", parse_mode="Markdown")
+            bot.send_document(OWNER_ID, ('aura_backup.csv', csv_data.getvalue()), caption="💾 **Daily Auto-Backup & Clean**", parse_mode="Markdown")
         except:
             pass
     finally:
@@ -186,7 +186,8 @@ def check_force_sub(user_id):
     return True
 
 def clean_url(url):
-    if '?' in url and ('instagram.com' in url or 'tiktok.com' in url or 'capcut.com' in url):
+    # CapCut removed, tracking tags only cleaned for IG and TikTok
+    if '?' in url and ('instagram.com' in url or 'tiktok.com' in url):
         return url.split('?')[0]
     return url
 
@@ -195,19 +196,14 @@ def get_bottom_keyboard(user_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     if user_id == OWNER_ID:
         markup.add(
-            KeyboardButton("👤 Profile"), 
-            KeyboardButton("💎 Get Subscriptions"),
-            KeyboardButton("🏆 Leaderboards"), 
-            KeyboardButton("🎁 Invite & Earn"),
-            KeyboardButton("🎁 Daily Claim"), 
-            KeyboardButton("ℹ️ Help & Rules")
+            KeyboardButton("👤 Profile"), KeyboardButton("💎 Get Subscriptions"),
+            KeyboardButton("🏆 Leaderboards"), KeyboardButton("🎁 Invite & Earn"),
+            KeyboardButton("🎁 Daily Claim"), KeyboardButton("ℹ️ Help & Rules")
         )
     else:
         markup.add(
-            KeyboardButton("👤 Profile"), 
-            KeyboardButton("💎 Get Subscriptions"),
-            KeyboardButton("🎁 Invite & Earn"), 
-            KeyboardButton("🎁 Daily Claim"),
+            KeyboardButton("👤 Profile"), KeyboardButton("💎 Get Subscriptions"),
+            KeyboardButton("🎁 Invite & Earn"), KeyboardButton("🎁 Daily Claim"),
             KeyboardButton("ℹ️ Help & Rules")
         )
     return markup
@@ -215,7 +211,7 @@ def get_bottom_keyboard(user_id):
 def get_inline_menu(msg_id):
     markup = InlineKeyboardMarkup()
     markup.row(
-        InlineKeyboardButton("🎬 Video", callback_data=f"dl|vid|{msg_id}"),
+        InlineKeyboardButton("🎬 Video (Auto)", callback_data=f"dl|vid|{msg_id}"),
         InlineKeyboardButton("🎵 Audio", callback_data=f"dl|aud|{msg_id}")
     )
     markup.row(
@@ -275,7 +271,7 @@ def start_cmd(message):
         usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
 
     text = f"🚀 **Hello {message.from_user.first_name} , Welcome to AURA DOWNLOADER!**\n"
-    text += "Drop any video link (YouTube, TikTok, FB, IG, **CapCut**) to start downloading instantly.\n\n"
+    text += "Drop any video link (YouTube, TikTok, FB, IG, **Pinterest**) to start downloading instantly.\n\n"
     text += f"👑 **Role:** {role_text}\n"
     text += f"📥 **Usage:** `{usage_text}`\n"
     text += f"👥 **Community:** `{total_users} Users`\n\n"
@@ -403,7 +399,7 @@ def bottom_menu_handler(message):
             bot.reply_to(message, "🎉 **+2 Extra Downloads Added!**\nEnjoy your daily bonus.", parse_mode="Markdown")
 
     elif message.text == "ℹ️ Help & Rules":
-        text = "🛠 **Commands & Rules:**\n- `/redeem CODE` - Upgrade plan.\n- `/spin` - Lucky draw.\n- `/settings` - Customization.\n- **Support:** Just type your message here to send a ticket to Admin.\n- Free users get 5 DL/Day.\n- Max 50MB per video (2GB for Diamond/Owner)."
+        text = "🛠 **Commands & Rules:**\n- `/redeem CODE` - Upgrade plan.\n- `/spin` - Lucky draw.\n- `/settings` - Customization.\n- **Support:** Just type your message here to send a ticket to Admin.\n- **Supported:** YouTube, TikTok, FB, IG, Pinterest.\n- Free users get 5 DL/Day.\n- Max 50MB per video (2GB for Diamond/Owner)."
         bot.reply_to(message, text, parse_mode="Markdown")
         
     db.close()
@@ -1028,7 +1024,7 @@ def support_ticket(message):
     except:
         pass
 
-# --- CORE DOWNLOADER (THE MAGICAL YOUTUBE & CAPCUT FIX) ---
+# --- CORE DOWNLOADER (Universal Fix Without FFmpeg) ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
     user_id = message.from_user.id
@@ -1044,6 +1040,7 @@ def handle_link(message):
         return bot.reply_to(message, "🐢 **Too fast!** Please wait 3 seconds.", parse_mode="Markdown")
     user_cooldowns[user_id] = now
 
+    # Feature: Spam Auto-Ban Tracker
     spam_tracker[user_id] = spam_tracker.get(user_id, 0) + 1
     if spam_tracker[user_id] > 10:
         db = SessionLocal()
@@ -1112,10 +1109,11 @@ def process_dl(call):
     if user.role in ['diamond', 'owner']:
         max_size = 2000 * 1024 * 1024 
 
-    format_string = '18/22/best[ext=mp4]/best' 
+    # 🚀 UNIVERSAL FIX: Use basic 'best' which downloads a pre-merged mp4 file for all platforms without needing ffmpeg.
+    format_string = 'best[ext=mp4]/best' 
     
     if dl_type == 'aud':
-        format_string = 'm4a/bestaudio/best'
+        format_string = 'bestaudio[ext=m4a]/bestaudio/best'
 
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
@@ -1125,7 +1123,10 @@ def process_dl(call):
         'no_warnings': True,
         'ignoreerrors': False,
         'noplaylist': True,
-        'format': format_string
+        'format': format_string,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
+        }
     }
     
     if dl_type == 'thumb': 
@@ -1148,7 +1149,7 @@ def process_dl(call):
             downloaded_files = glob.glob(f'downloads/{info["id"]}_{user.id}.*')
             
             if not downloaded_files:
-                raise Exception("File not saved. Server block or Private link.")
+                raise Exception("File not saved. Download stream was broken.")
                 
             path = downloaded_files[0]
 
@@ -1158,7 +1159,7 @@ def process_dl(call):
                 if file_size > 49.5 and not USE_LOCAL_SERVER:
                     raise Exception("File too large for Public API (50MB Limit).")
 
-                bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
+                bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type in ['vid', '4k'] else 'upload_document')
                 with open(path, 'rb') as file:
                     if dl_type == 'aud': 
                         bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA**")
@@ -1189,8 +1190,17 @@ def process_dl(call):
         if msg_id in url_storage:
             del url_storage[msg_id]
 
+# --- STARTUP NOTIFICATION FOR ADMIN ---
+def send_startup_msg():
+    try:
+        bot.send_message(OWNER_ID, "🚀 **AURA Bot Server is now ONLINE and Running!**\nSystem is ready to receive commands.", parse_mode="Markdown")
+    except:
+        pass
+
 if __name__ == "__main__":
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
+    
+    send_startup_msg()
     logger.info("AURA Enterprise Bot Started!")
     bot.infinity_polling()
