@@ -6,11 +6,14 @@ import logging
 import glob
 import csv
 import random
+import traceback
+
 try:
     import psutil
 except ImportError:
     os.system("pip install psutil")
     import psutil
+
 from io import StringIO
 from datetime import datetime, timedelta
 import yt_dlp
@@ -21,13 +24,13 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- LOGGING ---
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 8037371175  # Apnar Main Admin ID
-DATABASE_URL = os.getenv("DATABASE_URL")
+BOT_TOKEN = os.getenv("BOT_TOKEN") 
+OWNER_ID = 8037371175  # আপনার মেইন এডমিন আইডি
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
 USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
@@ -130,11 +133,9 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
 def daily_tasks():
     db = SessionLocal()
     try:
-        # Limit Reset
         db.query(User).update({User.daily_downloads: 0})
         db.commit()
         
-        # Daily DB Backup for Owner
         users = db.query(User).all()
         csv_data = StringIO()
         writer = csv.writer(csv_data)
@@ -153,7 +154,10 @@ def clean_storage():
     files = glob.glob('downloads/*')
     for f in files:
         if os.path.isfile(f):
-            os.remove(f)
+            try:
+                os.remove(f)
+            except:
+                pass
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(daily_tasks, 'cron', hour=0, minute=0)
@@ -826,7 +830,7 @@ def broadcast_cmd(message):
     db.close()
     bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success} users.")
 
-# --- CORE DOWNLOADER (YT/SHORTS FIXED & 2GB READY) ---
+# --- CORE DOWNLOADER (FULLY OPTIMIZED) ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
 def handle_link(message):
     user_id = message.from_user.id
@@ -899,20 +903,32 @@ def process_dl(call):
     if user.role in ['diamond', 'owner']:
         max_size = 2000 * 1024 * 1024 
 
-    # 🚀 EXACT QUALITY FIX (No FFmpeg Merging required)
+    # --- DYNAMIC YTDLP OPTIONS ---
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
         'max_filesize': max_size,
         'quiet': True,
-        'noplaylist': True,
-        'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        'nocheckcertificate': True,
+        'no_warnings': True,
+        'ignoreerrors': True,
+        'noplaylist': True
     }
     
-    if dl_type == 'vid': 
-        ydl_opts['format'] = 'best[ext=mp4]/best' 
-    elif dl_type == 'aud': 
-        ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
-    elif dl_type == 'thumb': 
+    # Platform specific format optimization
+    if 'youtube.com' in url or 'youtu.be' in url:
+        if dl_type == 'vid':
+            # 'b' ensures it grabs a single file with both audio and video, avoiding silent videos if ffmpeg isn't perfectly configured
+            ydl_opts['format'] = 'b[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best'
+        elif dl_type == 'aud':
+            ydl_opts['format'] = 'm4a/bestaudio/best'
+    else:
+        # For TikTok, Facebook, Instagram, etc.
+        if dl_type == 'vid':
+            ydl_opts['format'] = 'best'
+        elif dl_type == 'aud':
+            ydl_opts['format'] = 'bestaudio/best'
+
+    if dl_type == 'thumb': 
         ydl_opts['skip_download'] = True
         ydl_opts['writethumbnail'] = True
 
@@ -922,6 +938,9 @@ def process_dl(call):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             
+            if not info:
+                raise Exception("Failed to extract video information. Link might be private or invalid.")
+
             if dl_type == 'thumb':
                 thumb_url = info.get('thumbnail')
                 if thumb_url:
@@ -929,9 +948,9 @@ def process_dl(call):
                 bot.delete_message(call.message.chat.id, msg.message_id)
                 return
 
-            downloaded_files = glob.glob(f'downloads/{info["id"]}_{user.id}.*')
+            downloaded_files = glob.glob(f'downloads/*_{user.id}.*')
             if not downloaded_files:
-                raise Exception("File not saved")
+                raise Exception("File could not be saved to storage.")
             path = downloaded_files[0]
 
             if os.path.exists(path):
@@ -941,13 +960,19 @@ def process_dl(call):
                     raise Exception("File too large for Public API. Needs Local Server.")
 
                 bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
+                
                 with open(path, 'rb') as file:
                     if dl_type == 'aud': 
                         bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA**")
                     else: 
-                        bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**")
+                        bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**", supports_streaming=True)
                 
-                os.remove(path)
+                # Clean up file immediately after sending
+                try:
+                    os.remove(path)
+                except:
+                    pass
+                
                 bot.delete_message(call.message.chat.id, msg.message_id)
                 
                 if user.auto_delete:
@@ -957,17 +982,23 @@ def process_dl(call):
                         pass
                 
     except Exception as e:
-        logger.error(f"DL Error: {e}")
+        logger.error(f"DL Error: {traceback.format_exc()}")
+        
+        # Refund limit if it fails
         if user.role != 'owner' and user.daily_downloads > 0:
             user.daily_downloads -= 1
         user.total_downloads -= 1
         db.commit()
         
-        error_msg = "❌ Download failed or file too large."
+        error_msg = "❌ Download failed or file too large/private."
         if "Local Server" in str(e) or "Public API" in str(e):
             error_msg = "❌ File ti 50MB er boro! (Admin ke Local API On korte bolun)."
             
-        bot.edit_message_text(f"{error_msg} Apnar limit refund deya hoyeche!", call.message.chat.id, msg.message_id)
+        try:
+            bot.edit_message_text(f"{error_msg}\n\nApnar limit refund deya hoyeche!", call.message.chat.id, msg.message_id)
+        except:
+            pass
+            
     finally:
         db.close()
         if msg_id in url_storage:
