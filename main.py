@@ -14,6 +14,12 @@ except ImportError:
     os.system("pip install psutil")
     import psutil
 
+try:
+    import google.generativeai as genai
+except ImportError:
+    os.system("pip install google-generativeai")
+    import google.generativeai as genai
+
 from io import StringIO
 from datetime import datetime, timedelta
 import yt_dlp
@@ -29,11 +35,15 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN") 
-OWNER_ID = 8037371175  # আপনার মেইন এডমিন আইডি
+OWNER_ID = 8037371175  
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
 USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -47,6 +57,7 @@ MAINTENANCE = False
 MAINTENANCE_MSG = "🛠 **Bot under maintenance. Please wait.**"
 url_storage = {}
 user_cooldowns = {}
+chat_mode_users = set() # Set to track users in AI chat mode
 
 LIMITS = {
     'free': 5, 
@@ -62,7 +73,7 @@ PRICING = {
     'diamond': '100 TK'
 }
 
-UNAUTH_MSG = "🚫 **UNAUTHORIZED:** Sudhumatro Owner ei command ti bebohar korte parbe!"
+UNAUTH_MSG = "🚫 **UNAUTHORIZED:** Only the Owner can use this command!"
 
 # --- DATABASE SETUP ---
 Base = declarative_base()
@@ -113,7 +124,7 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
                 ref.daily_downloads = max(0, ref.daily_downloads - 2)
                 db.commit()
                 try:
-                    bot.send_message(ref.id, "🎉 Kew apnar invite link diye join koreche! +2 Extra limit added.")
+                    bot.send_message(ref.id, "🎉 Someone joined using your invite link! +2 Extra limit added.")
                 except:
                     pass
 
@@ -123,7 +134,7 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
             user.role_expires_at = None
             db.commit()
             try:
-                bot.send_message(user.id, "⚠️ Apnar Premium plan er meyad shesh hoyeche!")
+                bot.send_message(user.id, "⚠️ Your Premium plan has expired!")
             except:
                 pass
                 
@@ -170,7 +181,7 @@ def prevent_unauthorized_groups(message: ChatMemberUpdated):
     if message.new_chat_member.status in ['member', 'administrator']:
         if message.from_user.id != OWNER_ID:
             try:
-                bot.send_message(message.chat.id, "🚫 **UNAUTHORIZED ADD:**\nSudhumatro Owner amake group ba channel e add korte parbe. Ami leave korchi, Goodbye! 👋", parse_mode="Markdown")
+                bot.send_message(message.chat.id, "🚫 **UNAUTHORIZED ADD:**\nOnly the Owner can add me to groups or channels. I am leaving, Goodbye! 👋", parse_mode="Markdown")
                 bot.leave_chat(message.chat.id)
             except:
                 bot.leave_chat(message.chat.id)
@@ -192,6 +203,17 @@ def clean_url(url):
     if '?' in url and ('instagram.com' in url or 'tiktok.com' in url):
         return url.split('?')[0]
     return url
+
+def get_platform_name(url):
+    url = url.lower()
+    if 'youtube.com' in url or 'youtu.be' in url: return "YouTube 🔴"
+    elif 'tiktok.com' in url: return "TikTok 🎵"
+    elif 'facebook.com' in url or 'fb.watch' in url or 'fb.gg' in url: return "Facebook 📘"
+    elif 'instagram.com' in url: return "Instagram 📸"
+    elif 'twitter.com' in url or 'x.com' in url: return "X (Twitter) 🐦"
+    elif 'pinterest.com' in url or 'pin.it' in url: return "Pinterest 📌"
+    elif 'linkedin.com' in url: return "LinkedIn 💼"
+    return "Web 🌐"
 
 # --- UI MENUS ---
 def get_bottom_keyboard():
@@ -268,12 +290,13 @@ def start_cmd(message):
         role_text = f"`{user.role.capitalize()}`"
         usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
 
-    text = f"🚀 **Hello {message.from_user.first_name} , Welcome to AURA DOWNLOADER!**\n"
+    text = f"🚀 **Hello {message.from_user.first_name}, Welcome to AURA DOWNLOADER!**\n"
     text += "Drop any video link to start downloading instantly.\n\n"
     text += f"👑 **Role:** {role_text}\n"
     text += f"📥 **Usage:** `{usage_text}`\n"
     text += f"👥 **Community:** `{total_users} Users`\n\n"
-    text += f"👨‍💻 **DEV :** [Ononto Hasan](https://www.facebook.com/yours.ononto)"
+    text += "💬 **Need Help?** Send `/chat` to talk to our AI Assistant. You can ask in English or Bengali.\n\n"
+    text += f"👨‍💻 **DEV:** [Ononto Hasan](https://www.facebook.com/yours.ononto)"
 
     bot.send_message(message.chat.id, text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown", disable_web_page_preview=True)
 
@@ -289,6 +312,19 @@ def start_cmd(message):
         time.sleep(0.5)
         bot.send_message(message.chat.id, flex_text, parse_mode="Markdown")
 
+@bot.message_handler(commands=['chat'])
+def start_ai_chat(message):
+    chat_mode_users.add(message.from_user.id)
+    bot.reply_to(message, "🤖 **AI Live Chat Started!**\nHow can I assist you today? (You can ask your questions in English or Bengali).\n\n_Type /chatoff to close the live chat._", parse_mode="Markdown")
+
+@bot.message_handler(commands=['chatoff'])
+def stop_ai_chat(message):
+    if message.from_user.id in chat_mode_users:
+        chat_mode_users.remove(message.from_user.id)
+        bot.reply_to(message, "🛑 **AI Live Chat Closed.**\nDrop a video link whenever you're ready to download!", parse_mode="Markdown")
+    else:
+        bot.reply_to(message, "You are not currently in chat mode. Send `/chat` to start.", parse_mode="Markdown")
+
 @bot.message_handler(commands=['spin'])
 def lucky_spin_cmd(message):
     db = SessionLocal()
@@ -296,11 +332,11 @@ def lucky_spin_cmd(message):
     
     if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
         db.close()
-        return bot.reply_to(message, "⚠️ **Apnar ekhono limit baki ache!**\nAjker limit shesh holei apni Lucky Spin 🎰 khelte parben.", parse_mode="Markdown")
+        return bot.reply_to(message, "⚠️ **You still have limits left!**\nYou can play Lucky Spin 🎰 when today's limit is exhausted.", parse_mode="Markdown")
 
     if user.last_spin and user.last_spin.date() == datetime.now().date():
         db.close()
-        return bot.reply_to(message, "⚠️ Apni ajke already Spin korechen! Kal abar try korun.")
+        return bot.reply_to(message, "⚠️ You have already spun today! Try again tomorrow.")
         
     user.last_spin = datetime.now()
     bot.reply_to(message, "🎰 **Spinning the wheel...**")
@@ -311,15 +347,15 @@ def lucky_spin_cmd(message):
         user.role = 'silver'
         user.role_expires_at = datetime.now() + timedelta(hours=1)
         user.daily_downloads = 0
-        result = "🎉 **JACKPOT!** Apni peyechen **1 Hour Silver Plan**! Enjoy unlimited fast downloads for 1 hr."
+        result = "🎉 **JACKPOT!** You got the **1 Hour Silver Plan**! Enjoy unlimited fast downloads for 1 hr."
     elif chance <= 30:
         user.daily_downloads = max(0, user.daily_downloads - 3)
-        result = "🎁 **Awesome!** Apni peyechen **+3 Extra Downloads** ajker jonno!"
+        result = "🎁 **Awesome!** You got **+3 Extra Downloads** for today!"
     elif chance <= 60:
         user.daily_downloads = max(0, user.daily_downloads - 1)
-        result = "🎁 **Good!** Apni peyechen **+1 Extra Download** ajker jonno!"
+        result = "🎁 **Good!** You got **+1 Extra Download** for today!"
     else:
-        result = "💔 **Better luck next time!** Ajke kichu jiten ni. Kalke abar try korun!"
+        result = "💔 **Better luck next time!** You didn't win anything today. Try again tomorrow!"
         
     db.commit()
     db.close()
@@ -349,7 +385,7 @@ def bottom_menu_handler(message):
         bot.reply_to(message, text, parse_mode="Markdown")
         
     elif message.text == "💎 Get Subscriptions":
-        text = f"💎 **AURA PREMIUM SUBSCRIPTIONS** 💎\n\n🥈 **Silver:** 20 DL/Day ➡️ **{PRICING['silver']}**\n🥇 **Gold:** 50 DL/Day ➡️ **{PRICING['gold']}**\n💎 **Diamond (2GB Big File):** 100 DL/Day ➡️ **{PRICING['diamond']}**\n\n💳 **Bkash/Nagad:** `01846849460` (Send Money)\n\n⚠️ Payment korar por nicher button theke verify korun:"
+        text = f"💎 **AURA PREMIUM SUBSCRIPTIONS** 💎\n\n🥈 **Silver:** 20 DL/Day ➡️ **{PRICING['silver']}**\n🥇 **Gold:** 50 DL/Day ➡️ **{PRICING['gold']}**\n💎 **Diamond (2GB Big File):** 100 DL/Day ➡️ **{PRICING['diamond']}**\n\n💳 **Bkash/Nagad:** `01846849460` (Send Money)\n\n⚠️ After making the payment, verify using the button below:"
         markup = InlineKeyboardMarkup().add(InlineKeyboardButton("✅ Verify Payment", callback_data="verify_payment"))
         bot.reply_to(message, text, reply_markup=markup, parse_mode="Markdown")
             
@@ -368,9 +404,9 @@ def bottom_menu_handler(message):
 
     elif message.text == "🎁 Daily Claim":
         if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
-            bot.reply_to(message, f"⚠️ **Apnar ekhono limit baki ache!**\nAjker limit ({LIMITS[user.role]}) shesh holei apni Daily Claim bebohar korte parben.", parse_mode="Markdown")
+            bot.reply_to(message, f"⚠️ **You still have limits left!**\nYou can use Daily Claim only when today's limit ({LIMITS[user.role]}) is exhausted.", parse_mode="Markdown")
         elif user.last_daily_claim and user.last_daily_claim.date() == datetime.now().date():
-            bot.reply_to(message, "⚠️ Ajker daily claim apni already niye niyechhen! Kal abar ashben.")
+            bot.reply_to(message, "⚠️ You have already claimed your daily bonus today! Come back tomorrow.")
         else:
             user.daily_downloads = max(0, user.daily_downloads - 2)
             user.last_daily_claim = datetime.now()
@@ -378,7 +414,7 @@ def bottom_menu_handler(message):
             bot.reply_to(message, "🎉 **+2 Extra Downloads Added!**\nEnjoy your daily bonus.", parse_mode="Markdown")
 
     elif message.text == "ℹ️ Help & Rules":
-        text = "🛠 **Commands & Rules:**\n- `/redeem CODE` - Upgrade plan.\n- `/spin` - Lucky draw (Limit shesh hole).\n- `/settings` - Customization.\n- Free users get 5 DL/Day.\n- Max 50MB per video (2GB for Diamond/Owner)."
+        text = "🛠 **Commands & Rules:**\n- `/redeem CODE` - Upgrade plan.\n- `/spin` - Lucky draw (When limit is over).\n- `/settings` - Customization.\n- `/chat` - Talk to AI support.\n- Free users get 5 DL/Day.\n- Max 50MB per video (2GB for Diamond/Owner)."
         bot.reply_to(message, text, parse_mode="Markdown")
         
     db.close()
@@ -413,15 +449,15 @@ def toggle_auto_delete(call):
 # --- PAYMENT VERIFICATION SYSTEM ---
 @bot.callback_query_handler(func=lambda call: call.data == 'verify_payment')
 def verify_payment_start(call):
-    msg = bot.send_message(call.message.chat.id, "📸 Doya kore apnar Payment er **Screenshot** ti ekhane send korun.")
+    msg = bot.send_message(call.message.chat.id, "📸 Please send the **Screenshot** of your payment here.")
     bot.register_next_step_handler(msg, process_payment_ss)
 
 def process_payment_ss(message):
     if not message.photo:
-        bot.reply_to(message, "❌ Eita screenshot noy. Abar 'Get Subscriptions' theke 'Verify Payment' e click kore chobi din.")
+        bot.reply_to(message, "❌ This is not a screenshot. Please click 'Verify Payment' from 'Get Subscriptions' again and send an image.")
         return
     file_id = message.photo[-1].file_id
-    msg = bot.reply_to(message, "✅ Screenshot peyechi. Ebar apnar **TrxID (Transaction ID)** ba je number theke taka pathiyechen seta likhe send korun.")
+    msg = bot.reply_to(message, "✅ Screenshot received. Now send your **TrxID (Transaction ID)** or the number you sent the money from.")
     bot.register_next_step_handler(msg, process_payment_trxid, file_id)
 
 def process_payment_trxid(message, file_id):
@@ -441,7 +477,7 @@ def process_payment_trxid(message, file_id):
 
     caption = f"💳 **New Payment Request!**\n\n👤 User: {name} (`{user_id}`)\n🔢 TrxID / Number: `{trxid}`"
     bot.send_photo(OWNER_ID, file_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
-    bot.reply_to(message, "✅ Apnar request Admin er kache pathano hoyeche. Khub taratari apnar plan upgrade hoye jabe!")
+    bot.reply_to(message, "✅ Your request has been sent to the Admin. Your plan will be upgraded very soon!")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('apv|'))
 def admin_approve_payment(call):
@@ -456,14 +492,14 @@ def admin_approve_payment(call):
     target_user = get_user(db, target_id)
     
     if action == 'reject':
-        bot.send_message(target_id, "❌ Sorry, apnar payment verify kora jayni. Admin apnar request reject koreche.")
+        bot.send_message(target_id, "❌ Sorry, your payment could not be verified. The Admin has rejected your request.")
         bot.answer_callback_query(call.id, "Rejected!")
         bot.edit_message_caption(f"{call.message.caption}\n\n❌ **STATUS: REJECTED**", call.message.chat.id, call.message.message_id)
     else:
         target_user.role = action
         target_user.role_expires_at = datetime.now() + timedelta(days=30) 
         db.commit()
-        bot.send_message(target_id, f"🎉 **Congratulations!** Apnar payment verify hoyeche.\nApni ekhon **{action.capitalize()}** plan e achen. Enjoy!")
+        bot.send_message(target_id, f"🎉 **Congratulations!** Your payment has been verified.\nYou are now on the **{action.capitalize()}** plan. Enjoy!")
         bot.answer_callback_query(call.id, f"Approved as {action}!")
         bot.edit_message_caption(f"{call.message.caption}\n\n✅ **STATUS: APPROVED ({action.upper()})**", call.message.chat.id, call.message.message_id)
     db.close()
@@ -517,7 +553,7 @@ def generate_code_cmd(message):
     count = int(num_str) if num_str.isdigit() else 1
     
     if len(parts) != 3:
-        return bot.reply_to(message, "⚠️ **Vul Format!**\nUse: `/gencode[count] [role] [hours]`\nExample: `/gencode10 silver 24`", parse_mode="Markdown")
+        return bot.reply_to(message, "⚠️ **Wrong Format!**\nUse: `/gencode[count] [role] [hours]`\nExample: `/gencode10 silver 24`", parse_mode="Markdown")
     
     try:
         role = parts[1].lower()
@@ -552,7 +588,7 @@ def generate_code_cmd(message):
             os.remove(file_name)
             
     except Exception as e:
-        bot.reply_to(message, f"❌ Error: Role ba format vul. Example: `/gencode100 diamond 48`", parse_mode="Markdown")
+        bot.reply_to(message, f"❌ Error: Wrong role or format. Example: `/gencode100 diamond 48`", parse_mode="Markdown")
 
 @bot.message_handler(commands=['redeem'])
 def redeem_cmd(message):
@@ -571,17 +607,17 @@ def redeem_cmd(message):
     
     if user.last_code_used and user.last_code_used.date() == datetime.now().date():
         db.close()
-        return bot.reply_to(message, "❌ Apni ajke already ekta redeem code use korechen. Kal abar try korun.")
+        return bot.reply_to(message, "❌ You have already used a redeem code today. Try again tomorrow.")
 
     code_in = parts[1].strip()
     c = db.query(RedeemCode).filter(RedeemCode.code == code_in).first()
     
     if not c:
-        bot.reply_to(message, "❌ Invalid Code. Code ti sothik noy.")
+        bot.reply_to(message, "❌ Invalid Code. The code is incorrect.")
     elif c.is_used:
-        bot.reply_to(message, "❌ Ei code ti already onno kew use kore feleche.")
+        bot.reply_to(message, "❌ This code has already been used by someone else.")
     elif c.expires_at and datetime.now() > c.expires_at:
-        bot.reply_to(message, "❌ Ei code ti expire hoye geche!")
+        bot.reply_to(message, "❌ This code has expired!")
     else:
         user.role = c.role_granted
         user.role_expires_at = datetime.now() + timedelta(days=1)
@@ -589,7 +625,7 @@ def redeem_cmd(message):
         user.daily_downloads = 0
         c.is_used = True
         db.commit()
-        bot.reply_to(message, f"✅ **Success!**\nApni ekhon **{c.role_granted.capitalize()}** plan e achen 24 ghontar jonno.")
+        bot.reply_to(message, f"✅ **Success!**\nYou are now on the **{c.role_granted.capitalize()}** plan for 24 hours.")
     db.close()
 
 @bot.message_handler(commands=['gift'])
@@ -813,7 +849,7 @@ def broadcast_cmd(message):
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     msg_text = message.text.replace('/broadcast', '').strip()
     if not msg_text:
-        return bot.reply_to(message, "⚠️ Eivabe likhun: `/broadcast Hello!`", parse_mode="Markdown")
+        return bot.reply_to(message, "⚠️ Write it like this: `/broadcast Hello!`", parse_mode="Markdown")
     
     db = SessionLocal()
     users = db.query(User).all()
@@ -853,12 +889,12 @@ def handle_link(message):
 
     if user.role != 'owner' and user.daily_downloads >= LIMITS[user.role]:
         limit_msg = (
-            f"❌ **Apnar ajker Download Limit shesh! ({LIMITS[user.role]}/{LIMITS[user.role]})**\n\n"
+            f"❌ **Your Daily Download Limit is exhausted! ({LIMITS[user.role]}/{LIMITS[user.role]})**\n\n"
             f"💎 **GET SUBSCRIPTIONS:**\n"
             f"🥈 Silver (20 DL) - **{PRICING['silver']}**\n"
             f"🥇 Gold (50 DL) - **{PRICING['gold']}**\n"
             f"💎 Diamond (100 DL / 2GB File) - **{PRICING['diamond']}**\n\n"
-            f"Nicher **'💎 Get Subscriptions'** button a click kore payment korun!"
+            f"Click the **'💎 Get Subscriptions'** button below to make a payment!"
         )
         return bot.reply_to(message, limit_msg, parse_mode="Markdown")
 
@@ -867,7 +903,15 @@ def handle_link(message):
     msg_id = message.message_id
     url_storage[msg_id] = url
     
-    bot.reply_to(message, f"🔗 **Link Analyzed!**\nChoose format:", reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
+    platform = get_platform_name(url)
+    
+    text = (
+        f"🔗 **Link Successfully Analyzed!**\n\n"
+        f"🌐 **Platform:** `{platform}`\n"
+        f"📏 **Max Size:** `50 MB` (Auto-compressed)\n\n"
+        f"👇 **Choose your format:**"
+    )
+    bot.reply_to(message, text, reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
 def cancel_action(call):
@@ -914,26 +958,24 @@ def process_dl(call):
         'noplaylist': True
     }
     
-    # Platform specific format optimization
+    # Platform specific format optimization (50MB Limit Enforcement)
     if 'youtube.com' in url or 'youtu.be' in url:
         if dl_type == 'vid':
-            # 'b' ensures it grabs a single file with both audio and video, avoiding silent videos if ffmpeg isn't perfectly configured
-            ydl_opts['format'] = 'b[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best'
+            ydl_opts['format'] = 'bestvideo[filesize<40M]+bestaudio[filesize<10M]/best[filesize<50M]/worst'
         elif dl_type == 'aud':
-            ydl_opts['format'] = 'm4a/bestaudio/best'
+            ydl_opts['format'] = 'bestaudio[filesize<50M]/best'
     else:
-        # For TikTok, Facebook, Instagram, etc.
         if dl_type == 'vid':
-            ydl_opts['format'] = 'best'
+            ydl_opts['format'] = 'best[filesize<50M]/worst'
         elif dl_type == 'aud':
-            ydl_opts['format'] = 'bestaudio/best'
+            ydl_opts['format'] = 'bestaudio[filesize<50M]/best'
 
     if dl_type == 'thumb': 
         ydl_opts['skip_download'] = True
         ydl_opts['writethumbnail'] = True
 
     try:
-        bot.edit_message_text("🚀 **Uploading to Telegram...**\nDoya kore ektu opekha korun.", call.message.chat.id, msg.message_id, parse_mode="Markdown")
+        bot.edit_message_text("🚀 **Uploading to Telegram...**\nWait a moment please.", call.message.chat.id, msg.message_id, parse_mode="Markdown")
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -967,7 +1009,6 @@ def process_dl(call):
                     else: 
                         bot.send_video(call.message.chat.id, file, caption="⚡ **AURA Downloader**", supports_streaming=True)
                 
-                # Clean up file immediately after sending
                 try:
                     os.remove(path)
                 except:
@@ -984,7 +1025,6 @@ def process_dl(call):
     except Exception as e:
         logger.error(f"DL Error: {traceback.format_exc()}")
         
-        # Refund limit if it fails
         if user.role != 'owner' and user.daily_downloads > 0:
             user.daily_downloads -= 1
         user.total_downloads -= 1
@@ -992,10 +1032,10 @@ def process_dl(call):
         
         error_msg = "❌ Download failed or file too large/private."
         if "Local Server" in str(e) or "Public API" in str(e):
-            error_msg = "❌ File ti 50MB er boro! (Admin ke Local API On korte bolun)."
+            error_msg = "❌ The file is larger than 50MB! (Ask the Admin to enable Local API)."
             
         try:
-            bot.edit_message_text(f"{error_msg}\n\nApnar limit refund deya hoyeche!", call.message.chat.id, msg.message_id)
+            bot.edit_message_text(f"{error_msg}\n\nYour limit has been refunded!", call.message.chat.id, msg.message_id)
         except:
             pass
             
@@ -1003,6 +1043,27 @@ def process_dl(call):
         db.close()
         if msg_id in url_storage:
             del url_storage[msg_id]
+
+# --- AI CHAT HANDLER ---
+@bot.message_handler(func=lambda m: m.text and m.from_user.id in chat_mode_users and not m.text.startswith('/'))
+def handle_ai_chat(message):
+    if not GEMINI_API_KEY:
+        return bot.reply_to(message, "⚠️ AI Live Chat is currently offline. (Admin: Please set the GEMINI_API_KEY environment variable).")
+        
+    bot.send_chat_action(message.chat.id, 'typing')
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        prompt = (
+            "You are a helpful and friendly AI support assistant for the 'AURA Downloader Bot'. "
+            "The bot helps users download videos and audio from platforms like YouTube, Facebook, TikTok, Instagram, etc. "
+            "Help the user with their queries. If they ask the question in Bengali, reply in Bengali. "
+            f"If they ask in English, reply in English.\n\nUser Question: {message.text}"
+        )
+        response = model.generate_content(prompt)
+        bot.reply_to(message, response.text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"AI Chat Error: {e}")
+        bot.reply_to(message, "❌ The AI is currently busy. Please try again later.")
 
 if __name__ == "__main__":
     if not os.path.exists("downloads"):
