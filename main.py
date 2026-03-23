@@ -15,10 +15,10 @@ except ImportError:
     import psutil
 
 try:
-    import google.generativeai as genai
+    from openai import OpenAI
 except ImportError:
-    os.system("pip install google-generativeai")
-    import google.generativeai as genai
+    os.system("pip install openai")
+    from openai import OpenAI
 
 from io import StringIO
 from datetime import datetime, timedelta
@@ -40,10 +40,12 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
 USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+# Initialize DeepSeek Client
+ai_client = None
+if DEEPSEEK_API_KEY:
+    ai_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
 
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -57,7 +59,7 @@ MAINTENANCE = False
 MAINTENANCE_MSG = "🛠 **Bot under maintenance. Please wait.**"
 url_storage = {}
 user_cooldowns = {}
-chat_mode_users = set() # Set to track users in AI chat mode
+chat_mode_users = set()
 
 LIMITS = {
     'free': 5, 
@@ -315,7 +317,7 @@ def start_cmd(message):
 @bot.message_handler(commands=['chat'])
 def start_ai_chat(message):
     chat_mode_users.add(message.from_user.id)
-    bot.reply_to(message, "🤖 **AI Live Chat Started!**\nHow can I assist you today? (You can ask your questions in English or Bengali).\n\n_Type /chatoff to close the live chat._", parse_mode="Markdown")
+    bot.reply_to(message, "🤖 **AI Live Chat Started!**\nHow can I assist you today? (Powered by DeepSeek. Ask in English or Bengali).\n\n_Type /chatoff to close the live chat._", parse_mode="Markdown")
 
 @bot.message_handler(commands=['chatoff'])
 def stop_ai_chat(message):
@@ -943,32 +945,25 @@ def process_dl(call):
     user.total_downloads += 1
     db.commit()
 
-    max_size = 50 * 1024 * 1024 
-    if user.role in ['diamond', 'owner']:
-        max_size = 2000 * 1024 * 1024 
-
-    # --- DYNAMIC YTDLP OPTIONS ---
+    # --- DYNAMIC YTDLP OPTIONS (Fixed for Max Compatibility) ---
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
-        'max_filesize': max_size,
         'quiet': True,
         'nocheckcertificate': True,
         'no_warnings': True,
         'ignoreerrors': True,
-        'noplaylist': True
+        'noplaylist': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
     }
     
-    # Platform specific format optimization (50MB Limit Enforcement)
-    if 'youtube.com' in url or 'youtu.be' in url:
-        if dl_type == 'vid':
-            ydl_opts['format'] = 'bestvideo[filesize<40M]+bestaudio[filesize<10M]/best[filesize<50M]/worst'
-        elif dl_type == 'aud':
-            ydl_opts['format'] = 'bestaudio[filesize<50M]/best'
-    else:
-        if dl_type == 'vid':
-            ydl_opts['format'] = 'best[filesize<50M]/worst'
-        elif dl_type == 'aud':
-            ydl_opts['format'] = 'bestaudio[filesize<50M]/best'
+    # Removed max_filesize from here so yt-dlp doesn't abort early.
+    # We rely on the b/best format which usually comes out to a smaller size automatically.
+    if dl_type == 'vid':
+        ydl_opts['format'] = 'b/best'
+    elif dl_type == 'aud':
+        ydl_opts['format'] = 'bestaudio/best'
 
     if dl_type == 'thumb': 
         ydl_opts['skip_download'] = True
@@ -996,10 +991,13 @@ def process_dl(call):
             path = downloaded_files[0]
 
             if os.path.exists(path):
+                # We check the size AFTER download to avoid yt-dlp aborting hidden-size videos
                 file_size = os.path.getsize(path) / (1024 * 1024)
+                max_allowed_size = 49.5 if user.role not in ['diamond', 'owner'] else 1950.0
                 
-                if file_size > 49.5 and not USE_LOCAL_SERVER:
-                    raise Exception("File too large for Public API. Needs Local Server.")
+                if file_size > max_allowed_size and not USE_LOCAL_SERVER:
+                    os.remove(path)
+                    raise Exception(f"File too large for your plan ({round(file_size, 1)}MB). Limit is {max_allowed_size}MB.")
 
                 bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
                 
@@ -1030,9 +1028,9 @@ def process_dl(call):
         user.total_downloads -= 1
         db.commit()
         
-        error_msg = "❌ Download failed or file too large/private."
-        if "Local Server" in str(e) or "Public API" in str(e):
-            error_msg = "❌ The file is larger than 50MB! (Ask the Admin to enable Local API)."
+        error_msg = "❌ Download failed or file is private/too large."
+        if "File too large" in str(e):
+            error_msg = f"❌ {str(e)}\n\nPlease upgrade your plan to download files up to 2GB."
             
         try:
             bot.edit_message_text(f"{error_msg}\n\nYour limit has been refunded!", call.message.chat.id, msg.message_id)
@@ -1044,26 +1042,32 @@ def process_dl(call):
         if msg_id in url_storage:
             del url_storage[msg_id]
 
-# --- AI CHAT HANDLER ---
+# --- AI CHAT HANDLER (DEEPSEEK) ---
 @bot.message_handler(func=lambda m: m.text and m.from_user.id in chat_mode_users and not m.text.startswith('/'))
 def handle_ai_chat(message):
-    if not GEMINI_API_KEY:
-        return bot.reply_to(message, "⚠️ AI Live Chat is currently offline. (Admin: Please set the GEMINI_API_KEY environment variable).")
+    if not ai_client:
+        return bot.reply_to(message, "⚠️ AI Live Chat is currently offline. (Admin: Please set the DEEPSEEK_API_KEY environment variable).")
         
     bot.send_chat_action(message.chat.id, 'typing')
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        prompt = (
-            "You are a helpful and friendly AI support assistant for the 'AURA Downloader Bot'. "
-            "The bot helps users download videos and audio from platforms like YouTube, Facebook, TikTok, Instagram, etc. "
-            "Help the user with their queries. If they ask the question in Bengali, reply in Bengali. "
-            f"If they ask in English, reply in English.\n\nUser Question: {message.text}"
+        response = ai_client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are a helpful and friendly AI support assistant for the 'AURA Downloader Bot'. "
+                               "The bot helps users download videos and audio from platforms like YouTube, Facebook, TikTok, Instagram, Pinterest, etc. "
+                               "If the user asks a question in Bengali, reply in Bengali. If they ask in English, reply in English. Keep answers short and helpful."
+                },
+                {"role": "user", "content": message.text}
+            ],
+            max_tokens=500
         )
-        response = model.generate_content(prompt)
-        bot.reply_to(message, response.text, parse_mode="Markdown")
+        reply = response.choices[0].message.content
+        bot.reply_to(message, reply, parse_mode="Markdown")
     except Exception as e:
-        logger.error(f"AI Chat Error: {e}")
-        bot.reply_to(message, "❌ The AI is currently busy. Please try again later.")
+        logger.error(f"DeepSeek AI Chat Error: {e}")
+        bot.reply_to(message, "❌ The AI is currently busy or the API key is invalid. Please try again later.")
 
 if __name__ == "__main__":
     if not os.path.exists("downloads"):
