@@ -7,18 +7,13 @@ import glob
 import csv
 import random
 import traceback
+import requests
 
 try:
     import psutil
 except ImportError:
     os.system("pip install psutil")
     import psutil
-
-try:
-    from openai import OpenAI
-except ImportError:
-    os.system("pip install openai")
-    from openai import OpenAI
 
 from io import StringIO
 from datetime import datetime, timedelta
@@ -41,11 +36,6 @@ FORCE_CHANNELS = []
 
 USE_LOCAL_SERVER = os.getenv("USE_LOCAL_SERVER", "False").lower() == "true"
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-
-# Initialize DeepSeek Client
-ai_client = None
-if DEEPSEEK_API_KEY:
-    ai_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
 
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -202,6 +192,14 @@ def check_force_sub(user_id):
     return True
 
 def clean_url(url):
+    # Fix for Pinterest short links
+    if 'pin.it' in url:
+        try:
+            r = requests.get(url, allow_redirects=True, timeout=5)
+            url = r.url
+        except:
+            pass
+            
     if '?' in url and ('instagram.com' in url or 'tiktok.com' in url):
         return url.split('?')[0]
     return url
@@ -958,10 +956,8 @@ def process_dl(call):
         }
     }
     
-    # Removed max_filesize from here so yt-dlp doesn't abort early.
-    # We rely on the b/best format which usually comes out to a smaller size automatically.
     if dl_type == 'vid':
-        ydl_opts['format'] = 'b/best'
+        ydl_opts['format'] = 'best[ext=mp4]/best'
     elif dl_type == 'aud':
         ydl_opts['format'] = 'bestaudio/best'
 
@@ -991,7 +987,6 @@ def process_dl(call):
             path = downloaded_files[0]
 
             if os.path.exists(path):
-                # We check the size AFTER download to avoid yt-dlp aborting hidden-size videos
                 file_size = os.path.getsize(path) / (1024 * 1024)
                 max_allowed_size = 49.5 if user.role not in ['diamond', 'owner'] else 1950.0
                 
@@ -1042,17 +1037,21 @@ def process_dl(call):
         if msg_id in url_storage:
             del url_storage[msg_id]
 
-# --- AI CHAT HANDLER (DEEPSEEK) ---
+# --- AI CHAT HANDLER (DEEPSEEK via Requests) ---
 @bot.message_handler(func=lambda m: m.text and m.from_user.id in chat_mode_users and not m.text.startswith('/'))
 def handle_ai_chat(message):
-    if not ai_client:
+    if not DEEPSEEK_API_KEY:
         return bot.reply_to(message, "⚠️ AI Live Chat is currently offline. (Admin: Please set the DEEPSEEK_API_KEY environment variable).")
         
     bot.send_chat_action(message.chat.id, 'typing')
     try:
-        response = ai_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
                 {
                     "role": "system", 
                     "content": "You are a helpful and friendly AI support assistant for the 'AURA Downloader Bot'. "
@@ -1061,12 +1060,21 @@ def handle_ai_chat(message):
                 },
                 {"role": "user", "content": message.text}
             ],
-            max_tokens=500
-        )
-        reply = response.choices[0].message.content
-        bot.reply_to(message, reply, parse_mode="Markdown")
+            "max_tokens": 500
+        }
+        
+        response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=20)
+        response_data = response.json()
+        
+        if "choices" in response_data:
+            reply = response_data["choices"][0]["message"]["content"]
+            bot.reply_to(message, reply, parse_mode="Markdown")
+        else:
+            logger.error(f"DeepSeek API Response Error: {response_data}")
+            bot.reply_to(message, "❌ API Error: Something went wrong with DeepSeek.")
+            
     except Exception as e:
-        logger.error(f"DeepSeek AI Chat Error: {e}")
+        logger.error(f"DeepSeek Request Error: {e}")
         bot.reply_to(message, "❌ The AI is currently busy or the API key is invalid. Please try again later.")
 
 if __name__ == "__main__":
