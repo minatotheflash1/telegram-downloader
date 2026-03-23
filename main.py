@@ -15,6 +15,12 @@ except ImportError:
     os.system("pip install psutil")
     import psutil
 
+try:
+    from openai import OpenAI
+except ImportError:
+    os.system("pip install openai")
+    from openai import OpenAI
+
 from io import StringIO
 from datetime import datetime, timedelta
 import yt_dlp
@@ -192,15 +198,19 @@ def check_force_sub(user_id):
     return True
 
 def clean_url(url):
-    # Fix for Pinterest short links
+    # Fix for Pinterest short links (Better Bypass)
     if 'pin.it' in url:
         try:
-            r = requests.get(url, allow_redirects=True, timeout=5)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            r = requests.get(url, headers=headers, allow_redirects=True, timeout=10)
             url = r.url
         except:
             pass
             
-    if '?' in url and ('instagram.com' in url or 'tiktok.com' in url):
+    # Clean query params for Insta/TikTok/Pinterest
+    if '?' in url and ('instagram.com' in url or 'tiktok.com' in url or 'pinterest.com' in url):
         return url.split('?')[0]
     return url
 
@@ -949,17 +959,24 @@ def process_dl(call):
         'quiet': True,
         'nocheckcertificate': True,
         'no_warnings': True,
-        'ignoreerrors': True,
+        'ignoreerrors': False, # It must be False so it throws an error we can catch
         'noplaylist': True,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate'
         }
     }
     
+    # Platform specific format optimization
     if dl_type == 'vid':
-        ydl_opts['format'] = 'best[ext=mp4]/best'
+        if 'youtube.com' in url or 'youtu.be' in url:
+            ydl_opts['format'] = 'b/best/w' # b = Best single file with both video+audio
+        else:
+            ydl_opts['format'] = 'b/best'
     elif dl_type == 'aud':
-        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['format'] = 'm4a/bestaudio/best'
 
     if dl_type == 'thumb': 
         ydl_opts['skip_download'] = True
@@ -1023,9 +1040,13 @@ def process_dl(call):
         user.total_downloads -= 1
         db.commit()
         
-        error_msg = "❌ Download failed or file is private/too large."
+        # New Detailed Error Message Logic
+        error_msg = f"❌ **Error:** {str(e)}"
+        
         if "File too large" in str(e):
             error_msg = f"❌ {str(e)}\n\nPlease upgrade your plan to download files up to 2GB."
+        elif "Private video" in str(e) or "Status code 403" in str(e):
+            error_msg = "❌ This video is private or blocked by the platform."
             
         try:
             bot.edit_message_text(f"{error_msg}\n\nYour limit has been refunded!", call.message.chat.id, msg.message_id)
