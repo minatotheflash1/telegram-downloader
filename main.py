@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN") 
-OWNER_ID = 8037371175  
+OWNER_ID = 8651895707  
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
@@ -198,7 +198,6 @@ def check_force_sub(user_id):
     return True
 
 def clean_url(url):
-    # Fix for Pinterest short links (Better Bypass)
     if 'pin.it' in url:
         try:
             headers = {
@@ -209,7 +208,6 @@ def clean_url(url):
         except:
             pass
             
-    # Clean query params for Insta/TikTok/Pinterest
     if '?' in url and ('instagram.com' in url or 'tiktok.com' in url or 'pinterest.com' in url):
         return url.split('?')[0]
     return url
@@ -959,7 +957,7 @@ def process_dl(call):
         'quiet': True,
         'nocheckcertificate': True,
         'no_warnings': True,
-        'ignoreerrors': False, # It must be False so it throws an error we can catch
+        'ignoreerrors': False, 
         'noplaylist': True,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -969,12 +967,12 @@ def process_dl(call):
         }
     }
     
-    # Platform specific format optimization
+    # Universal format fallback to prevent "format not available" error
     if dl_type == 'vid':
         if 'youtube.com' in url or 'youtu.be' in url:
-            ydl_opts['format'] = 'b/best/w' # b = Best single file with both video+audio
+            ydl_opts['format'] = 'b/best/w' # For YouTube
         else:
-            ydl_opts['format'] = 'b/best'
+            ydl_opts['format'] = 'bestvideo+bestaudio/best/b/worst' # Bulletproof fallback for Pinterest/TikTok/FB
     elif dl_type == 'aud':
         ydl_opts['format'] = 'm4a/bestaudio/best'
 
@@ -1040,7 +1038,6 @@ def process_dl(call):
         user.total_downloads -= 1
         db.commit()
         
-        # New Detailed Error Message Logic
         error_msg = f"❌ **Error:** {str(e)}"
         
         if "File too large" in str(e):
