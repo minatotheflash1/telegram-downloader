@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN") 
-OWNER_ID = 8651895707  
+OWNER_ID = 8037371175  
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
@@ -511,6 +511,8 @@ def a_to_z_commands(message):
 
 **🔧 System & Management:**
 `/admin` - Open Visual Admin Panel
+`/maintenance` - Turn ON Maintenance mode
+`/maintenanceoff` - Turn OFF Maintenance mode
 `/ping` - Check Bot server speed
 `/export` - Download DB as CSV
 `/broadcast [Msg]` - Message all users
@@ -537,6 +539,22 @@ _Example: /gencode10 silver 24_
 `/settings` - User settings
 """
     bot.reply_to(message, text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['maintenance'])
+def cmd_maintenance_on(message):
+    if message.from_user.id != OWNER_ID:
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+    global MAINTENANCE
+    MAINTENANCE = True
+    bot.reply_to(message, "🔴 **Maintenance Mode:** `ON`\nOnly the Supreme Commander can use the bot now.", parse_mode="Markdown")
+
+@bot.message_handler(commands=['maintenanceoff'])
+def cmd_maintenance_off(message):
+    if message.from_user.id != OWNER_ID:
+        return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
+    global MAINTENANCE
+    MAINTENANCE = False
+    bot.reply_to(message, "🟢 **Maintenance Mode:** `OFF`\nAll citizens can now access the AURA network.", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text and m.text.startswith('/gencode'))
 def generate_code_cmd(message):
@@ -590,7 +608,7 @@ def generate_code_cmd(message):
 @bot.message_handler(commands=['redeem'])
 def redeem_cmd(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID:
-        return
+        return bot.reply_to(message, MAINTENANCE_MSG, parse_mode="Markdown")
     parts = message.text.split()
     if len(parts) < 2:
         return bot.reply_to(message, "Use: `/redeem AURA-CODE`")
@@ -868,7 +886,8 @@ def broadcast_cmd(message):
 def handle_link(message):
     user_id = message.from_user.id
     if MAINTENANCE and user_id != OWNER_ID:
-        return
+        return bot.reply_to(message, MAINTENANCE_MSG, parse_mode="Markdown")
+    
     if not check_force_sub(user_id):
         return bot.reply_to(message, "⚠️ Authenticate via channel first.")
 
@@ -956,7 +975,10 @@ def process_dl(call):
     }
     
     if dl_type == 'vid':
-        ydl_opts['format'] = 'b/best/w'
+        if 'youtube.com' in url or 'youtu.be' in url:
+            ydl_opts['format'] = 'b/best/w'
+        else:
+            ydl_opts['format'] = 'bestvideo+bestaudio/best/b/worst'
     elif dl_type == 'aud':
         ydl_opts['format'] = 'm4a/bestaudio/best'
 
