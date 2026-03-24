@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN") 
-OWNER_ID = 8651895707  
+OWNER_ID = 8651895707  # Updated to your new Supreme Commander ID
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
@@ -994,12 +994,8 @@ def process_dl(call):
         ydl_opts['cookiefile'] = 'cookies.txt'
     
     if dl_type == 'vid':
-        if 'youtube.com' in url or 'youtu.be' in url:
-            ydl_opts['format'] = 'b/best/w'
-        elif 'facebook.com' in url or 'fb.watch' in url or 'fb.gg' in url:
-            ydl_opts['format'] = 'b/best/bestvideo+bestaudio/worst'
-        else:
-            ydl_opts['format'] = 'bestvideo+bestaudio/best/b/worst'
+        # Strictly forcing single pre-merged files to avoid FFmpeg errors on all platforms
+        ydl_opts['format'] = 'b/best/w'
     elif dl_type == 'aud':
         ydl_opts['format'] = 'm4a/bestaudio/best'
 
