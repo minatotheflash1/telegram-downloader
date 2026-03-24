@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN") 
-OWNER_ID = 8651895707  
+OWNER_ID = 8651895707
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
@@ -326,7 +326,7 @@ def start_cmd(message):
 @bot.message_handler(commands=['chat'])
 def start_ai_chat(message):
     chat_mode_users.add(message.from_user.id)
-    bot.reply_to(message, "🤖 **AURA Live Chat Initialized!**\nHow can I process your request today? (Powered by DeepSeek).\n\n_Type /chatoff to terminate the connection._", parse_mode="Markdown")
+    bot.reply_to(message, "🤖 **AURA Live Chat Initialized!**\nHow can I process your request today?\n\n_Type /chatoff to terminate the connection._", parse_mode="Markdown")
 
 @bot.message_handler(commands=['chatoff'])
 def stop_ai_chat(message):
@@ -980,7 +980,7 @@ def process_dl(call):
         'no_warnings': True,
         'ignoreerrors': False, 
         'noplaylist': True,
-        'extractor_args': {'youtube': ['player_client=android,ios,web']}, # Bypass YouTube Bot Check
+        'extractor_args': {'youtube': ['player_client=android,ios,web']}, 
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -989,17 +989,11 @@ def process_dl(call):
         }
     }
     
-    # Auto-load cookies if the user uploads a cookies.txt file to the server (Ultimate fail-safe)
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = 'cookies.txt'
     
     if dl_type == 'vid':
-        if 'youtube.com' in url or 'youtu.be' in url:
-            ydl_opts['format'] = 'b/best/w'
-        elif 'facebook.com' in url or 'fb.watch' in url or 'fb.gg' in url:
-            ydl_opts['format'] = 'b/best/bestvideo+bestaudio/worst'
-        else:
-            ydl_opts['format'] = 'bestvideo+bestaudio/best/b/worst'
+        ydl_opts['format'] = 'b/best/w'
     elif dl_type == 'aud':
         ydl_opts['format'] = 'm4a/bestaudio/best'
 
@@ -1089,6 +1083,12 @@ def handle_ai_chat(message):
         return bot.reply_to(message, "⚠️ DeepSeek core is offline. (Admin: Initialize DEEPSEEK_API_KEY).")
         
     bot.send_chat_action(message.chat.id, 'typing')
+    
+    system_prompt = """You are 'AURA', a highly intelligent, human-like AI assistant for the AURA Downloader Bot. 
+You have real human emotions. Adapt your tone: be funny if the user is joking, serious if they need real help, and totally savage/witty if they act smart or insult you. 
+If anyone asks about your creator/owner, you must proudly say: 'My creator is Ononto Hasan! He lives in Mymensingh. He's a Computer Trainer, Designer, Developer, and a Teacher at the IST Department of BRAC SDF. He also owns the awesome Facebook page "Toxic naaa?" with over 64k+ followers!'
+If the user speaks in Bengali/Banglish, you MUST reply in Banglish. If English, reply in English. Keep it conversational and natural."""
+
     try:
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -1099,13 +1099,11 @@ def handle_ai_chat(message):
             "messages": [
                 {
                     "role": "system", 
-                    "content": "You are a helpful and friendly AI support assistant for the 'AURA Downloader Bot'. "
-                               "The bot helps users download media from YouTube, Facebook, TikTok, Instagram, etc. "
-                               "If the user asks a question in Bengali, reply in Bengali. If they ask in English, reply in English. Keep answers short and futuristic."
+                    "content": system_prompt
                 },
                 {"role": "user", "content": message.text}
             ],
-            "max_tokens": 500
+            "max_tokens": 600
         }
         
         response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=20)
