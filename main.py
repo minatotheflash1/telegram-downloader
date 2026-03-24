@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN") 
-OWNER_ID = 8651895707
+OWNER_ID = 8651895707  
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
@@ -198,7 +198,6 @@ def check_force_sub(user_id):
     return True
 
 def clean_url(url):
-    # FB er short share URL jate valo vabe process hoy
     if 'pin.it' in url:
         try:
             headers = {
@@ -212,7 +211,6 @@ def clean_url(url):
     if '?' in url:
         if 'instagram.com' in url or 'tiktok.com' in url or 'pinterest.com' in url:
             url = url.split('?')[0]
-        # FB Reels ba Share link theke tracking details remove kora
         elif 'facebook.com/reel/' in url or 'facebook.com/share/' in url:
             url = url.split('?')[0]
             
@@ -982,6 +980,7 @@ def process_dl(call):
         'no_warnings': True,
         'ignoreerrors': False, 
         'noplaylist': True,
+        'extractor_args': {'youtube': ['player_client=android,ios,web']}, # Bypass YouTube Bot Check
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -990,11 +989,14 @@ def process_dl(call):
         }
     }
     
+    # Auto-load cookies if the user uploads a cookies.txt file to the server (Ultimate fail-safe)
+    if os.path.exists("cookies.txt"):
+        ydl_opts['cookiefile'] = 'cookies.txt'
+    
     if dl_type == 'vid':
         if 'youtube.com' in url or 'youtu.be' in url:
             ydl_opts['format'] = 'b/best/w'
         elif 'facebook.com' in url or 'fb.watch' in url or 'fb.gg' in url:
-            # Facebook specific universal format string
             ydl_opts['format'] = 'b/best/bestvideo+bestaudio/worst'
         else:
             ydl_opts['format'] = 'bestvideo+bestaudio/best/b/worst'
@@ -1067,8 +1069,8 @@ def process_dl(call):
         
         if "size limit exceeded" in str(e):
             error_msg = f"❌ {str(e)}\n\nPlease upgrade your AURA rank for heavier files."
-        elif "Private video" in str(e) or "Status code 403" in str(e) or "login" in str(e).lower() or "registered users" in str(e):
-            error_msg = "❌ Target system is encrypted (Private/Blocked).\nFacebook requires cookies to access this video."
+        elif "Private video" in str(e) or "Status code 403" in str(e) or "login" in str(e).lower() or "registered users" in str(e) or "bot" in str(e).lower():
+            error_msg = "❌ Target system is encrypted (Private/Blocked).\nServer requires cookies to bypass security checks."
             
         try:
             bot.edit_message_text(f"{error_msg}\n\nBandwidth refunded to your node!", call.message.chat.id, msg.message_id)
