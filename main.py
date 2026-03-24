@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN") 
-OWNER_ID = 8651895707  # Supreme Commander ID
+OWNER_ID = 8651895707  
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
@@ -57,20 +57,20 @@ url_storage = {}
 user_cooldowns = {}
 chat_mode_users = set()
 
-# Updated Roles & Limits
+# Updated Roles & Limits (Limits Increased, Price Same)
 LIMITS = {
-    'free': 5, 
-    'bronze': 15,
-    'silver': 30, 
-    'gold': 50, 
-    'platinum': 75,
-    'heroic': 100, 
-    'master': 150,
-    'membership': 200,
+    'free': 10, 
+    'bronze': 30,
+    'silver': 60, 
+    'gold': 100, 
+    'platinum': 150,
+    'heroic': 200, 
+    'master': 300,
+    'membership': 500,
     'owner': 999999
 }
 
-# Updated Pricing
+# Updated Pricing (Kept exactly as requested)
 PRICING = {
     'bronze': '20 TK',
     'silver': '40 TK', 
@@ -132,7 +132,7 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
                 ref.daily_downloads = max(0, ref.daily_downloads - 2)
                 db.commit()
                 try:
-                    bot.send_message(ref.id, "🎉 A new citizen joined using your invite link! +2 Extracion capacity added.")
+                    bot.send_message(ref.id, "🎉 A new citizen joined using your invite link! +2 Extraction capacity added.")
                 except:
                     pass
 
@@ -305,26 +305,27 @@ def start_cmd(message):
     if user.role == 'owner':
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
-        flex_text = f"🌌 **WELCOME BACK, SUPREME COMMANDER** 🌌\n\n"
+        flex_text = f"🌌 **WELCOME BACK, SUPREME COMMANDER** 🌌\n"
+        flex_text += f"━━━━━━━━━━━━━━━━━━━━━━\n"
         flex_text += f"The AURA Matrix acknowledges your presence, Master {message.from_user.first_name}. All systems are synchronized and awaiting your command.\n\n"
         flex_text += f"🌐 **Active Citizens:** `{total_users}`\n"
         flex_text += f"⚡ **Global Extractions:** `{total_bot_dls}`\n"
-        flex_text += f"🎛️ **Core Health:** CPU `{cpu}%` | RAM `{ram}%`\n\n"
-        flex_text += "Deploy your link parameters to initiate secure download overrides... 🔮"
+        flex_text += f"🎛️ **Core Health:** CPU `{cpu}%` | RAM `{ram}%`\n"
+        flex_text += f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        flex_text += "Deploy your link parameters to initiate secure overrides... 🔮"
         bot.send_message(message.chat.id, flex_text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown")
         return
 
-    # Normal user greeting
     role_text = f"`{user.role.upper()}`"
     usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
 
-    text = f"🚀 **Welcome to AURA NETWORK, {message.from_user.first_name}!**\n"
-    text += "Transmit any media url to execute high-speed extractions.\n\n"
-    text += f"🔰 **Clearance Level:** {role_text}\n"
-    text += f"📥 **Bandwidth Status:** `{usage_text}`\n"
-    text += f"🌐 **AURA Syndicate:** `{total_users} Connected Nodes`\n\n"
+    text = f"🚀 **AURA SYSTEM INITIALIZED** 🚀\n"
+    text += f"Greetings, {message.from_user.first_name}. Transmit any media url to execute high-speed extractions.\n\n"
+    text += f"💠 **Rank:** {role_text}\n"
+    text += f"🔋 **Bandwidth:** `{usage_text}`\n"
+    text += f"🌐 **Connected Nodes:** `{total_users}`\n\n"
     text += "🤖 **AI Access:** Send `/chat` to communicate with the DeepSeek Core.\n"
-    text += "💬 **Support:** Send `/feedback` to report anomalies directly to the Commander.\n\n"
+    text += "💬 **Support:** Send `/feedback [msg]` to report anomalies directly to the Commander.\n\n"
     text += f"👨‍💻 **Architect:** [Ononto Hasan](https://www.facebook.com/yours.ononto)"
 
     bot.send_message(message.chat.id, text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown", disable_web_page_preview=True)
@@ -417,22 +418,30 @@ def bottom_menu_handler(message):
             role_text = f"`{user.role.upper()}`"
             usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
 
-        text = f"👤 **AURA Node Profile**\n\n🆔 UUID: `{user.id}`\n👑 Clearance: {role_text}\n⏳ Decay: `{expiry}`\n📊 **Capacity:** `{usage_text}`\n📥 **Total Extracted:** `{user.total_downloads}`\n👥 **Synapse Invites:** `{user.referral_count}`\n\n🎰 *Exhausted? Run /spin*"
+        text = f"👤 **AURA Node Profile**\n━━━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"🆔 UUID: `{user.id}`\n"
+        text += f"👑 Clearance: {role_text}\n"
+        text += f"⏳ Decay: `{expiry}`\n"
+        text += f"📊 **Capacity:** `{usage_text}`\n"
+        text += f"📥 **Total Extracted:** `{user.total_downloads}`\n"
+        text += f"👥 **Synapse Invites:** `{user.referral_count}`\n━━━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"🎰 *Exhausted? Run /spin*"
         bot.reply_to(message, text, parse_mode="Markdown")
         
     elif message.text == "💎 Elite Upgrades":
-        text = "💎 **AURA MATRIX UPGRADES** 💎\n\n"
+        text = "💎 **AURA MATRIX UPGRADES** 💎\n━━━━━━━━━━━━━━━━━━━━━━\n"
         for role, price in PRICING.items():
             limit_str = "2GB Size Limit" if role in ['heroic', 'master', 'membership'] else "50MB Size Limit"
-            text += f"🔹 **{role.capitalize()}** ({LIMITS[role]} DLs/Day | {limit_str}) ➡️ **{price}**\n"
+            text += f"🔹 **{role.capitalize()}** ({LIMITS[role]} DLs | {limit_str}) ➡️ **{price}**\n"
             
-        text += "\n💳 **Payment Vector (Bkash/Nagad):** `01846849460` (Send Money)\n\n⚠️ Post-transfer, initialize the verification process below:"
+        text += "━━━━━━━━━━━━━━━━━━━━━━\n"
+        text += "💳 **Payment Vector (Bkash/Nagad):** `01846849460` (Send Money)\n\n⚠️ Post-transfer, initialize the verification process below:"
         markup = InlineKeyboardMarkup().add(InlineKeyboardButton("✅ Verify Ledger", callback_data="verify_payment"))
         bot.reply_to(message, text, reply_markup=markup, parse_mode="Markdown")
             
     elif message.text == "🏆 AURA Leaderboard":
         top = db.query(User).order_by(User.total_downloads.desc()).limit(5).all()
-        text = "🏆 **AURA Elite Protocol**\n\n"
+        text = "🏆 **AURA Elite Protocol**\n━━━━━━━━━━━━━━━━━━━━━━\n"
         for i, u in enumerate(top): 
             r_str = "COMMANDER" if u.role == 'owner' else u.role.upper()
             text += f"{i+1}. {u.name} (`{u.id}`) - **{r_str}** - 📥 {u.total_downloads}\n"
@@ -455,7 +464,7 @@ def bottom_menu_handler(message):
             bot.reply_to(message, "🎉 **+2 Capacity Restored!**\nUse it wisely.", parse_mode="Markdown")
 
     elif message.text == "ℹ️ System Logs":
-        text = "🛠 **AURA Directives:**\n- `/redeem CODE` - Inject rank code.\n- `/spin` - Quantum probability matrix.\n- `/settings` - Adjust UI.\n- `/chat` - DeepSeek AI Interface.\n- `/feedback Msg` - Ping the Commander.\n- Standard nodes: 5 DL/Day.\n- Max 50MB per file (2GB for Heroic+)."
+        text = "🛠 **AURA Directives:**\n- `/redeem CODE` - Inject rank code.\n- `/spin` - Quantum probability matrix.\n- `/settings` - Configure interactions.\n- `/chat` - DeepSeek AI Interface.\n- `/feedback Msg` - Ping the Commander.\n- Standard nodes: 10 DL/Day.\n- Max 50MB per file (2GB for Heroic+)."
         bot.reply_to(message, text, parse_mode="Markdown")
         
     db.close()
@@ -467,8 +476,8 @@ def settings_cmd(message):
     user = get_user(db, message.from_user.id)
     status = "ON 🟢" if user.auto_delete else "OFF 🔴"
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"Auto-Wipe Trace: {status}", callback_data=f"set_autodel|{user.id}"))
-    bot.reply_to(message, "⚙️ **AURA Preferences**\nModify your interaction footprint:", reply_markup=markup, parse_mode="Markdown")
+    markup.add(InlineKeyboardButton(f"Auto-Wipe Bot Messages: {status}", callback_data=f"set_autodel|{user.id}"))
+    bot.reply_to(message, "⚙️ **AURA Matrix Settings**\nConfigure your extraction environment:", reply_markup=markup, parse_mode="Markdown")
     db.close()
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_autodel'))
@@ -481,7 +490,7 @@ def toggle_auto_delete(call):
     
     status = "ON 🟢" if user.auto_delete else "OFF 🔴"
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"Auto-Wipe Trace: {status}", callback_data=f"set_autodel|{user.id}"))
+    markup.add(InlineKeyboardButton(f"Auto-Wipe Bot Messages: {status}", callback_data=f"set_autodel|{user.id}"))
     
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
     bot.answer_callback_query(call.id, f"Auto-Wipe engaged to {status.split()[0]}")
@@ -670,7 +679,7 @@ def redeem_cmd(message):
     if not c:
         bot.reply_to(message, "❌ Invalid Cipher.")
     elif c.is_used:
-        bot.reply_to(message, "❌ This cipher has already been compromised by another entity.")
+        bot.reply_to(message, "❌ This sequence has already been compromised by another entity.")
     elif c.expires_at and datetime.now() > c.expires_at:
         bot.reply_to(message, "❌ The code's digital decay is complete. It has expired!")
     else:
@@ -680,7 +689,7 @@ def redeem_cmd(message):
         user.daily_downloads = 0
         c.is_used = True
         db.commit()
-        bot.reply_to(message, f"✅ **AURA Core Refreshed!**\nYou are now operating with **{c.role_granted.capitalize()}** parameters for 24 hours.")
+        bot.reply_to(message, f"✅ **AURA Matrix Updated!**\nYou are now operating with **{c.role_granted.capitalize()}** parameters for 24 hours.")
     db.close()
 
 @bot.message_handler(commands=['gift'])
@@ -769,7 +778,7 @@ def search_user(message):
         u = db.query(User).filter(User.id == user_id).first()
         db.close()
         if u:
-            bot.reply_to(message, f"🔍 **Node Fingerprint:**\nDesignation: {u.name}\nUUID: `{u.id}`\nRank: {u.role}\nDLs: {u.total_downloads}\nBlacklist Status: {u.is_banned}", parse_mode="Markdown")
+            bot.reply_to(message, f"🔍 **Node Fingerprint:**\nDesignation: {u.name}\nUUID: `{u.id}`\nRank: {u.role}\nDLs: {u.total_downloads}\nBlacklisted: {u.is_banned}", parse_mode="Markdown")
         else:
             bot.reply_to(message, "❌ Target untraceable.")
     except:
@@ -789,7 +798,7 @@ def ban_unban_user(message):
             db.commit()
             bot.reply_to(message, f"✅ Target {user_id} has been {cmd}ned from the matrix.")
         else:
-            bot.reply_to(message, "❌ Target untraceable.")
+            bot.reply_to(message, "❌ ID not found.")
         db.close()
     except:
         bot.reply_to(message, "Use: `/ban [ID]` or `/unban [ID]`")
@@ -833,10 +842,10 @@ def add_limit_cmd(message):
         if u:
             u.daily_downloads = max(0, u.daily_downloads - amount)
             db.commit()
-            bot.reply_to(message, f"✅ Injected {amount} extractions to {user_id}.")
-            bot.send_message(user_id, f"🎁 Supreme Commander override: Received {amount} bonus extraction allocations!")
+            bot.reply_to(message, f"✅ Allocated {amount} extra bandwidth to {user_id}.")
+            bot.send_message(user_id, f"🎁 Supreme Commander injected {amount} extra extractions to your node!")
         else:
-            bot.reply_to(message, "❌ Target untraceable.")
+            bot.reply_to(message, "❌ ID not found.")
         db.close()
     except:
         bot.reply_to(message, "Use: `/addlimit [ID] [amount]`", parse_mode="Markdown")
@@ -855,7 +864,7 @@ def export_db_cmd(message):
         writer.writerow([u.id, u.name, u.role, u.total_downloads, u.join_date.strftime("%Y-%m-%d")])
     
     csv_data.seek(0)
-    bot.send_document(message.chat.id, ('aura_users.csv', csv_data.getvalue()), caption="📊 **AURA Internal Database Dump**", parse_mode="Markdown")
+    bot.send_document(message.chat.id, ('aura_users.csv', csv_data.getvalue()), caption="📊 **AURA Database Snapshot**", parse_mode="Markdown")
     db.close()
 
 @bot.message_handler(commands=['msg'])
@@ -960,14 +969,14 @@ def handle_link(message):
     url_storage[msg_id] = url
     
     platform = get_platform_name(url)
-    
-    # Calculate Display limit dynamically based on role
     limit_str = "2GB Raw Extraction" if user.role in ['heroic', 'master', 'membership', 'owner'] else "50MB Compressed"
     
     text = (
-        f"🔗 *Vector Lock Confirmed!*\n\n"
-        f"📡 **Origin:** `{platform}`\n"
-        f"📦 **Capacity:** `{limit_str}`\n\n"
+        f"🔗 *Vector Lock Confirmed!*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📡 **Source:** `{platform}`\n"
+        f"📦 **Capacity:** `{limit_str}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👇 *Define your protocol parameters:*"
     )
     bot.reply_to(message, text, reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
@@ -1025,7 +1034,7 @@ def process_dl(call):
         if 'youtube.com' in url or 'youtu.be' in url:
             ydl_opts['format'] = 'b/best/w'
         else:
-            # 100% No-FFMPEG requirement for FB/IG/TikTok
+            # Universal No-FFMPEG fallback ensuring pure combined formats
             ydl_opts['format'] = 'best[ext=mp4]/best/b/worst'
     elif dl_type == 'aud':
         ydl_opts['format'] = 'm4a/bestaudio/best'
@@ -1052,13 +1061,12 @@ def process_dl(call):
 
             downloaded_files = glob.glob(f'downloads/*_{user.id}.*')
             if not downloaded_files:
-                raise Exception("Corrupted write access to sector memory.")
+                raise Exception("Data extraction failure in local memory.")
             path = downloaded_files[0]
 
             if os.path.exists(path):
                 file_size = os.path.getsize(path) / (1024 * 1024)
                 
-                # Adjust limits dynamically
                 if user.role in ['heroic', 'master', 'membership', 'owner']:
                     max_allowed_size = 1950.0
                 else:
@@ -1083,11 +1091,8 @@ def process_dl(call):
                 
                 bot.delete_message(call.message.chat.id, msg.message_id)
                 
-                if user.auto_delete:
-                    try:
-                        bot.delete_message(call.message.chat.id, msg_id)
-                    except:
-                        pass
+                # We completely removed the logic that deletes the user's original link message
+                # It will never disappear now!
                 
     except Exception as e:
         logger.error(f"Execution Error: {traceback.format_exc()}")
