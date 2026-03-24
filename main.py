@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN") 
-OWNER_ID = 8651895707
+OWNER_ID = 8651895707  # Supreme Commander ID
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
@@ -52,26 +52,36 @@ if USE_LOCAL_SERVER:
     telebot.apihelper.API_URL = "http://localhost:8081/bot{0}/{1}"
 
 MAINTENANCE = False
-MAINTENANCE_MSG = "🛠 **AURA Core under maintenance. Please stand by.**"
+MAINTENANCE_MSG = "🛡️ **AURA Core System is under extreme maintenance. Stand by.**"
 url_storage = {}
 user_cooldowns = {}
 chat_mode_users = set()
 
+# Updated Roles & Limits
 LIMITS = {
     'free': 5, 
-    'silver': 20, 
+    'bronze': 15,
+    'silver': 30, 
     'gold': 50, 
-    'diamond': 100, 
+    'platinum': 75,
+    'heroic': 100, 
+    'master': 150,
+    'membership': 200,
     'owner': 999999
 }
 
+# Updated Pricing
 PRICING = {
-    'silver': '10 TK', 
-    'gold': '50 TK', 
-    'diamond': '100 TK'
+    'bronze': '20 TK',
+    'silver': '40 TK', 
+    'gold': '60 TK', 
+    'platinum': '80 TK',
+    'heroic': '100 TK',
+    'master': '150 TK',
+    'membership': '200 TK'
 }
 
-UNAUTH_MSG = "🚫 **ACCESS DENIED:** You lack the necessary AURA clearance!"
+UNAUTH_MSG = "🚫 **ACCESS DENIED:** You lack the required AURA clearance to execute this directive."
 
 # --- DATABASE SETUP ---
 Base = declarative_base()
@@ -122,7 +132,7 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
                 ref.daily_downloads = max(0, ref.daily_downloads - 2)
                 db.commit()
                 try:
-                    bot.send_message(ref.id, "🎉 Someone joined using your invite link! +2 Extra limit added.")
+                    bot.send_message(ref.id, "🎉 A new citizen joined using your invite link! +2 Extracion capacity added.")
                 except:
                     pass
 
@@ -132,7 +142,7 @@ def get_user(db, user_id, user_name="User", referrer_id=None):
             user.role_expires_at = None
             db.commit()
             try:
-                bot.send_message(user.id, "⚠️ Your Premium AURA plan has expired!")
+                bot.send_message(user.id, "⚠️ Your Premium AURA clearance has expired. Welcome back to standard access.")
             except:
                 pass
                 
@@ -153,7 +163,7 @@ def daily_tasks():
             writer.writerow([u.id, u.name, u.role, u.total_downloads, u.join_date.strftime("%Y-%m-%d")])
         csv_data.seek(0)
         try:
-            bot.send_document(OWNER_ID, ('aura_backup.csv', csv_data.getvalue()), caption="💾 **Daily AURA Backup**", parse_mode="Markdown")
+            bot.send_document(OWNER_ID, ('aura_backup.csv', csv_data.getvalue()), caption="💾 **AURA Matrix Auto-Backup Sequence**", parse_mode="Markdown")
         except:
             pass
     finally:
@@ -179,7 +189,7 @@ def prevent_unauthorized_groups(message: ChatMemberUpdated):
     if message.new_chat_member.status in ['member', 'administrator']:
         if message.from_user.id != OWNER_ID:
             try:
-                bot.send_message(message.chat.id, "🚫 **UNAUTHORIZED ADD:**\nOnly the Supreme Commander can add me to groups or channels. Initiating auto-leave protocol! 👋", parse_mode="Markdown")
+                bot.send_message(message.chat.id, "🚫 **UNAUTHORIZED BREACH:**\nOnly the Supreme Commander can establish group connections. Terminating link immediately! 👋", parse_mode="Markdown")
                 bot.leave_chat(message.chat.id)
             except:
                 bot.leave_chat(message.chat.id)
@@ -200,9 +210,7 @@ def check_force_sub(user_id):
 def clean_url(url):
     if 'pin.it' in url:
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+            headers = {'User-Agent': 'Mozilla/5.0'}
             r = requests.get(url, headers=headers, allow_redirects=True, timeout=10)
             url = r.url
         except:
@@ -230,33 +238,33 @@ def get_platform_name(url):
 def get_bottom_keyboard():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
-        KeyboardButton("👤 Profile"), 
-        KeyboardButton("💎 Get Subscriptions"),
-        KeyboardButton("🏆 Leaderboard"), 
-        KeyboardButton("🎁 Invite & Earn"),
-        KeyboardButton("🎁 Daily Claim"), 
-        KeyboardButton("ℹ️ Help & Rules")
+        KeyboardButton("👤 Matrix Profile"), 
+        KeyboardButton("💎 Elite Upgrades"),
+        KeyboardButton("🏆 AURA Leaderboard"), 
+        KeyboardButton("🎁 Network Invites"),
+        KeyboardButton("🔋 Restore Bandwidth"), 
+        KeyboardButton("ℹ️ System Logs")
     )
     return markup
 
 def get_inline_menu(msg_id):
     markup = InlineKeyboardMarkup()
     markup.row(
-        InlineKeyboardButton("🎬 Video", callback_data=f"dl|vid|{msg_id}"),
-        InlineKeyboardButton("🎵 Audio", callback_data=f"dl|aud|{msg_id}")
+        InlineKeyboardButton("🎬 Video Protocol", callback_data=f"dl|vid|{msg_id}"),
+        InlineKeyboardButton("🎵 Audio Extractor", callback_data=f"dl|aud|{msg_id}")
     )
     markup.row(
-        InlineKeyboardButton("🖼 Thumb", callback_data=f"dl|thumb|{msg_id}"),
-        InlineKeyboardButton("❌ Cancel", callback_data="cancel")
+        InlineKeyboardButton("🖼 Render Visuals", callback_data=f"dl|thumb|{msg_id}"),
+        InlineKeyboardButton("❌ Abort", callback_data="cancel")
     )
     return markup
 
 def loading_animation(chat_id, msg_id):
     stages = [
-        "💠 *Initiating AURA Protocol...*",
-        "🌀 *Extracting media streams...*",
-        "⚡ *Bypassing firewalls & fetching data...*",
-        "✅ *AURA Sync Complete!*"
+        "💠 *Initializing AURA Synapse...*",
+        "🌀 *Bypassing server firewalls...*",
+        "⚡ *Extracting raw data packets...*",
+        "✅ *AURA Sync Successful!*"
     ]
     for stage in stages:
         try:
@@ -274,8 +282,8 @@ def start_cmd(message):
     if not check_force_sub(message.from_user.id):
         btn = InlineKeyboardMarkup()
         for ch in FORCE_CHANNELS:
-            btn.add(InlineKeyboardButton(f"📢 Join {ch}", url=f"https://t.me/{ch.replace('@', '')}"))
-        return bot.reply_to(message, "⚠️ **Please join our channels to authorize your AURA connection!**", reply_markup=btn, parse_mode="Markdown")
+            btn.add(InlineKeyboardButton(f"📢 Secure Connection {ch}", url=f"https://t.me/{ch.replace('@', '')}"))
+        return bot.reply_to(message, "⚠️ **Please authenticate your channel connections to proceed.**", reply_markup=btn, parse_mode="Markdown")
 
     parts = message.text.split()
     referrer_id = None
@@ -292,49 +300,66 @@ def start_cmd(message):
     db.close()
     
     if user.is_banned:
-        return bot.reply_to(message, "❌ You have been banished from the AURA network.")
+        return bot.reply_to(message, "❌ Your node has been permanently blacklisted from AURA.")
     
     if user.role == 'owner':
-        role_text = "🌌 👑 **SUPREME COMMANDER** 👑 🌌"
-        usage_text = f"{user.total_downloads} / ∞"
-    else:
-        role_text = f"`{user.role.capitalize()}`"
-        usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
+        cpu = psutil.cpu_percent()
+        ram = psutil.virtual_memory().percent
+        flex_text = f"🌌 **WELCOME BACK, SUPREME COMMANDER** 🌌\n\n"
+        flex_text += f"The AURA Matrix acknowledges your presence, Master {message.from_user.first_name}. All systems are synchronized and awaiting your command.\n\n"
+        flex_text += f"🌐 **Active Citizens:** `{total_users}`\n"
+        flex_text += f"⚡ **Global Extractions:** `{total_bot_dls}`\n"
+        flex_text += f"🎛️ **Core Health:** CPU `{cpu}%` | RAM `{ram}%`\n\n"
+        flex_text += "Deploy your link parameters to initiate secure download overrides... 🔮"
+        bot.send_message(message.chat.id, flex_text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown")
+        return
 
-    text = f"🚀 **Welcome to AURA DOWNLOADER, {message.from_user.first_name}!**\n"
-    text += "Drop any supported media link to sync and extract instantly.\n\n"
-    text += f"👑 **AURA Rank:** {role_text}\n"
-    text += f"📥 **Bandwidth Usage:** `{usage_text}`\n"
-    text += f"👥 **AURA Syndicate:** `{total_users} Citizens`\n\n"
-    text += "🤖 **AI Access:** Send `/chat` to communicate with the deep-learning core (DeepSeek).\n\n"
+    # Normal user greeting
+    role_text = f"`{user.role.upper()}`"
+    usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
+
+    text = f"🚀 **Welcome to AURA NETWORK, {message.from_user.first_name}!**\n"
+    text += "Transmit any media url to execute high-speed extractions.\n\n"
+    text += f"🔰 **Clearance Level:** {role_text}\n"
+    text += f"📥 **Bandwidth Status:** `{usage_text}`\n"
+    text += f"🌐 **AURA Syndicate:** `{total_users} Connected Nodes`\n\n"
+    text += "🤖 **AI Access:** Send `/chat` to communicate with the DeepSeek Core.\n"
+    text += "💬 **Support:** Send `/feedback` to report anomalies directly to the Commander.\n\n"
     text += f"👨‍💻 **Architect:** [Ononto Hasan](https://www.facebook.com/yours.ononto)"
 
     bot.send_message(message.chat.id, text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown", disable_web_page_preview=True)
 
-    if message.from_user.id == OWNER_ID:
-        cpu = psutil.cpu_percent()
-        ram = psutil.virtual_memory().percent
-        flex_text = f"🌌 **AURA SUPREME COMMANDER ONLINE** 🌌\n\n"
-        flex_text += "Welcome back to the AURA Mainframe, Master. Systems are fully synchronized and operational.\n\n"
-        flex_text += f"📊 **Network Citizens:** `{total_users}`\n"
-        flex_text += f"⚡ **Data Extracted:** `{total_bot_dls} Files`\n"
-        flex_text += f"🎛️ **Core Status:** CPU `{cpu}%` | RAM `{ram}%`\n\n"
-        flex_text += "Awaiting your next directive... 🔮"
-        time.sleep(0.5)
-        bot.send_message(message.chat.id, flex_text, parse_mode="Markdown")
+@bot.message_handler(commands=['feedback'])
+def feedback_cmd(message):
+    if MAINTENANCE and message.from_user.id != OWNER_ID:
+        return bot.reply_to(message, MAINTENANCE_MSG, parse_mode="Markdown")
+    
+    parts = message.text.split(' ', 1)
+    if len(parts) < 2:
+        return bot.reply_to(message, "⚠️ **Syntax Error:** `/feedback [Your Message]`\nTransmit bugs, suggestions, or requests directly to the Supreme Commander.", parse_mode="Markdown")
+    
+    feedback_text = parts[1]
+    user_id = message.from_user.id
+    user_name = message.from_user.first_name
+    
+    bot.send_message(OWNER_ID, f"📨 **INCOMING AURA FEEDBACK** 📨\n\n👤 **From Node:** {user_name} (`{user_id}`)\n💬 **Transmission:**\n{feedback_text}\n\n_Reply Command:_ `/msg {user_id} [reply text]`", parse_mode="Markdown")
+    bot.reply_to(message, "✅ **Transmission Sent!** Your message is now in the hands of the Supreme Commander.", parse_mode="Markdown")
 
 @bot.message_handler(commands=['chat'])
 def start_ai_chat(message):
     chat_mode_users.add(message.from_user.id)
-    bot.reply_to(message, "🤖 **AURA Live Chat Initialized!**\nHow can I process your request today?\n\n_Type /chatoff to terminate the connection._", parse_mode="Markdown")
+    if message.from_user.id == OWNER_ID:
+        bot.reply_to(message, "🤖 **AURA Core Activated.**\nAwaiting your directive, Supreme Commander.", parse_mode="Markdown")
+    else:
+        bot.reply_to(message, "🤖 **AURA AI Link Established!**\nHow can the DeepSeek logic core assist you today? (Ask in English or Bengali).\n\n_Execute /chatoff to sever the link._", parse_mode="Markdown")
 
 @bot.message_handler(commands=['chatoff'])
 def stop_ai_chat(message):
     if message.from_user.id in chat_mode_users:
         chat_mode_users.remove(message.from_user.id)
-        bot.reply_to(message, "🛑 **AURA Live Chat Terminated.**\nAwaiting media URLs for extraction!", parse_mode="Markdown")
+        bot.reply_to(message, "🛑 **AI Synapse Severed.**\nAwaiting media streams for extraction.", parse_mode="Markdown")
     else:
-        bot.reply_to(message, "Your AI link is already inactive. Send `/chat` to re-establish.", parse_mode="Markdown")
+        bot.reply_to(message, "Your AI link is already inactive. Run `/chat` to connect.", parse_mode="Markdown")
 
 @bot.message_handler(commands=['spin'])
 def lucky_spin_cmd(message):
@@ -343,14 +368,14 @@ def lucky_spin_cmd(message):
     
     if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
         db.close()
-        return bot.reply_to(message, "⚠️ **Your bandwidth is not yet depleted!**\nYou can activate the Lucky Spin 🎰 when today's limit is at zero.", parse_mode="Markdown")
+        return bot.reply_to(message, "⚠️ **Bandwidth is stable!**\nYou can only trigger the Matrix Spin 🎰 when your daily capacity reaches zero.", parse_mode="Markdown")
 
     if user.last_spin and user.last_spin.date() == datetime.now().date():
         db.close()
-        return bot.reply_to(message, "⚠️ You have already spun the matrix today! Try again during the next solar cycle.")
+        return bot.reply_to(message, "⚠️ You have already accessed the anomaly today. Wait for the next solar cycle.")
         
     user.last_spin = datetime.now()
-    bot.reply_to(message, "🎰 **Spinning the AURA wheel...**")
+    bot.reply_to(message, "🎰 **Accessing Quantum Probability...**")
     time.sleep(1.5)
     chance = random.randint(1, 100)
     
@@ -358,21 +383,21 @@ def lucky_spin_cmd(message):
         user.role = 'silver'
         user.role_expires_at = datetime.now() + timedelta(hours=1)
         user.daily_downloads = 0
-        result = "🎉 **AURA JACKPOT!** You unlocked the **1 Hour Silver Override**! Enjoy unlimited high-speed extraction for 60 minutes."
+        result = "🎉 **AURA OVERRIDE SUCCESS!** You captured the **1-Hour Silver Clearance**! Infinite extractions enabled."
     elif chance <= 30:
         user.daily_downloads = max(0, user.daily_downloads - 3)
-        result = "🎁 **Excellent!** You received **+3 Extra Extractions** for today!"
+        result = "🎁 **Matrix Gift!** You recovered **+3 Extractions** for this cycle!"
     elif chance <= 60:
         user.daily_downloads = max(0, user.daily_downloads - 1)
-        result = "🎁 **Good!** You received **+1 Extra Extraction** for today!"
+        result = "🎁 **Node Boost!** You received **+1 Bonus Extraction**!"
     else:
-        result = "💔 **Matrix Failed!** You didn't win anything today. Re-calibrate and try again tomorrow!"
+        result = "💔 **Probability Failed.** Empty cache. Recalibrate and try tomorrow!"
         
     db.commit()
     db.close()
     bot.send_message(message.chat.id, result, parse_mode="Markdown")
 
-@bot.message_handler(func=lambda m: m.text in ["👤 Profile", "💎 Get Subscriptions", "🏆 Leaderboard", "🎁 Invite & Earn", "🎁 Daily Claim", "ℹ️ Help & Rules"])
+@bot.message_handler(func=lambda m: m.text in ["👤 Matrix Profile", "💎 Elite Upgrades", "🏆 AURA Leaderboard", "🎁 Network Invites", "🔋 Restore Bandwidth", "ℹ️ System Logs"])
 def bottom_menu_handler(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID:
         return
@@ -383,49 +408,54 @@ def bottom_menu_handler(message):
         db.close()
         return
     
-    if message.text == "👤 Profile":
-        expiry = user.role_expires_at.strftime("%Y-%m-%d %H:%M") if user.role_expires_at else "Lifetime"
+    if message.text == "👤 Matrix Profile":
+        expiry = user.role_expires_at.strftime("%Y-%m-%d %H:%M") if user.role_expires_at else "Infinite"
         if user.role == 'owner':
             role_text = "🌌 👑 **SUPREME COMMANDER** 👑 🌌"
             usage_text = f"{user.total_downloads} / ∞"
         else:
-            role_text = f"`{user.role.capitalize()}`"
+            role_text = f"`{user.role.upper()}`"
             usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
 
-        text = f"👤 **AURA Profile Data**\n\n🆔 UUID: `{user.id}`\n👑 Rank: {role_text}\n⏳ Expiry: `{expiry}`\n📊 **Usage:** `{usage_text}`\n📥 **Total Extracted:** `{user.total_downloads}`\n👥 **Network Invites:** `{user.referral_count}`\n🎰 **Run /spin when limit hits zero!**"
+        text = f"👤 **AURA Node Profile**\n\n🆔 UUID: `{user.id}`\n👑 Clearance: {role_text}\n⏳ Decay: `{expiry}`\n📊 **Capacity:** `{usage_text}`\n📥 **Total Extracted:** `{user.total_downloads}`\n👥 **Synapse Invites:** `{user.referral_count}`\n\n🎰 *Exhausted? Run /spin*"
         bot.reply_to(message, text, parse_mode="Markdown")
         
-    elif message.text == "💎 Get Subscriptions":
-        text = f"💎 **AURA PREMIUM UPGRADES** 💎\n\n🥈 **Silver:** 20 DL/Day ➡️ **{PRICING['silver']}**\n🥇 **Gold:** 50 DL/Day ➡️ **{PRICING['gold']}**\n💎 **Diamond (2GB Core Limit):** 100 DL/Day ➡️ **{PRICING['diamond']}**\n\n💳 **Bkash/Nagad:** `01846849460` (Send Money)\n\n⚠️ After transferring the funds, verify your transaction below:"
-        markup = InlineKeyboardMarkup().add(InlineKeyboardButton("✅ Verify Transaction", callback_data="verify_payment"))
+    elif message.text == "💎 Elite Upgrades":
+        text = "💎 **AURA MATRIX UPGRADES** 💎\n\n"
+        for role, price in PRICING.items():
+            limit_str = "2GB Size Limit" if role in ['heroic', 'master', 'membership'] else "50MB Size Limit"
+            text += f"🔹 **{role.capitalize()}** ({LIMITS[role]} DLs/Day | {limit_str}) ➡️ **{price}**\n"
+            
+        text += "\n💳 **Payment Vector (Bkash/Nagad):** `01846849460` (Send Money)\n\n⚠️ Post-transfer, initialize the verification process below:"
+        markup = InlineKeyboardMarkup().add(InlineKeyboardButton("✅ Verify Ledger", callback_data="verify_payment"))
         bot.reply_to(message, text, reply_markup=markup, parse_mode="Markdown")
             
-    elif message.text == "🏆 Leaderboard":
+    elif message.text == "🏆 AURA Leaderboard":
         top = db.query(User).order_by(User.total_downloads.desc()).limit(5).all()
-        text = "🏆 **AURA Elite Extractors**\n\n"
+        text = "🏆 **AURA Elite Protocol**\n\n"
         for i, u in enumerate(top): 
-            r_str = "SUPREME COMMANDER" if u.role == 'owner' else u.role.upper()
+            r_str = "COMMANDER" if u.role == 'owner' else u.role.upper()
             text += f"{i+1}. {u.name} (`{u.id}`) - **{r_str}** - 📥 {u.total_downloads}\n"
         bot.reply_to(message, text, parse_mode="Markdown")
         
-    elif message.text == "🎁 Invite & Earn":
+    elif message.text == "🎁 Network Invites":
         bot_username = bot.get_me().username
-        text = f"🎁 **Expand the AURA Syndicate!**\nGain +2 limit for every successful invite.\n\n🔗 Your Secure Link: `https://t.me/{bot_username}?start=ref_{user.id}`"
+        text = f"🎁 **Expand the Matrix!**\nReceive +2 capacity for every active node you bring online.\n\n🔗 Transmission Link: `https://t.me/{bot_username}?start=ref_{user.id}`"
         bot.reply_to(message, text, parse_mode="Markdown")
 
-    elif message.text == "🎁 Daily Claim":
+    elif message.text == "🔋 Restore Bandwidth":
         if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
-            bot.reply_to(message, f"⚠️ **Bandwidth intact!**\nYou can only claim the Daily Bonus when your limit ({LIMITS[user.role]}) is completely empty.", parse_mode="Markdown")
+            bot.reply_to(message, f"⚠️ **Buffer not empty!**\nClaim protocol is locked until your daily limit ({LIMITS[user.role]}) is completely utilized.", parse_mode="Markdown")
         elif user.last_daily_claim and user.last_daily_claim.date() == datetime.now().date():
-            bot.reply_to(message, "⚠️ You have already accessed your daily reserves. Return during the next solar cycle.")
+            bot.reply_to(message, "⚠️ Daily reserves already consumed. Re-establish connection tomorrow.")
         else:
             user.daily_downloads = max(0, user.daily_downloads - 2)
             user.last_daily_claim = datetime.now()
             db.commit()
-            bot.reply_to(message, "🎉 **+2 Extraction Limit Restored!**\nEnjoy your bonus bandwidth.", parse_mode="Markdown")
+            bot.reply_to(message, "🎉 **+2 Capacity Restored!**\nUse it wisely.", parse_mode="Markdown")
 
-    elif message.text == "ℹ️ Help & Rules":
-        text = "🛠 **AURA Directives:**\n- `/redeem CODE` - Upgrade clearance level.\n- `/spin` - Execute lucky protocol.\n- `/settings` - Configure matrix.\n- `/chat` - Interface with DeepSeek AI.\n- Standard accounts: 5 DL/Day.\n- Max 50MB per node (2GB for Diamond/Commander)."
+    elif message.text == "ℹ️ System Logs":
+        text = "🛠 **AURA Directives:**\n- `/redeem CODE` - Inject rank code.\n- `/spin` - Quantum probability matrix.\n- `/settings` - Adjust UI.\n- `/chat` - DeepSeek AI Interface.\n- `/feedback Msg` - Ping the Commander.\n- Standard nodes: 5 DL/Day.\n- Max 50MB per file (2GB for Heroic+)."
         bot.reply_to(message, text, parse_mode="Markdown")
         
     db.close()
@@ -437,8 +467,8 @@ def settings_cmd(message):
     user = get_user(db, message.from_user.id)
     status = "ON 🟢" if user.auto_delete else "OFF 🔴"
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"Auto-Delete Messages: {status}", callback_data=f"set_autodel|{user.id}"))
-    bot.reply_to(message, "⚙️ **AURA Matrix Settings**\nConfigure your extraction environment:", reply_markup=markup, parse_mode="Markdown")
+    markup.add(InlineKeyboardButton(f"Auto-Wipe Trace: {status}", callback_data=f"set_autodel|{user.id}"))
+    bot.reply_to(message, "⚙️ **AURA Preferences**\nModify your interaction footprint:", reply_markup=markup, parse_mode="Markdown")
     db.close()
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_autodel'))
@@ -451,24 +481,24 @@ def toggle_auto_delete(call):
     
     status = "ON 🟢" if user.auto_delete else "OFF 🔴"
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"Auto-Delete Messages: {status}", callback_data=f"set_autodel|{user.id}"))
+    markup.add(InlineKeyboardButton(f"Auto-Wipe Trace: {status}", callback_data=f"set_autodel|{user.id}"))
     
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
-    bot.answer_callback_query(call.id, f"Auto-Delete protocol set to {status.split()[0]}")
+    bot.answer_callback_query(call.id, f"Auto-Wipe engaged to {status.split()[0]}")
     db.close()
 
 # --- PAYMENT VERIFICATION SYSTEM ---
 @bot.callback_query_handler(func=lambda call: call.data == 'verify_payment')
 def verify_payment_start(call):
-    msg = bot.send_message(call.message.chat.id, "📸 Upload the **Screenshot** of your payment protocol here.")
+    msg = bot.send_message(call.message.chat.id, "📸 Transmit visual evidence (Screenshot) of your payment.")
     bot.register_next_step_handler(msg, process_payment_ss)
 
 def process_payment_ss(message):
     if not message.photo:
-        bot.reply_to(message, "❌ Invalid media. Please initiate 'Verify Transaction' again and upload an image.")
+        bot.reply_to(message, "❌ Invalid media type. Please trigger 'Verify Ledger' again and transmit an image file.")
         return
     file_id = message.photo[-1].file_id
-    msg = bot.reply_to(message, "✅ Image logged. Input your **TrxID (Transaction ID)** or the origin phone number.")
+    msg = bot.reply_to(message, "✅ Evidence accepted. Provide your **TrxID (Transaction ID)** or originating digits.")
     bot.register_next_step_handler(msg, process_payment_trxid, file_id)
 
 def process_payment_trxid(message, file_id):
@@ -477,23 +507,19 @@ def process_payment_trxid(message, file_id):
     name = message.from_user.first_name
 
     markup = InlineKeyboardMarkup()
-    markup.row(
-        InlineKeyboardButton("Approve 🥈 Silver", callback_data=f"apv|silver|{user_id}"),
-        InlineKeyboardButton("Approve 🥇 Gold", callback_data=f"apv|gold|{user_id}")
-    )
-    markup.row(
-        InlineKeyboardButton("Approve 💎 Diamond", callback_data=f"apv|diamond|{user_id}"),
-        InlineKeyboardButton("❌ Reject", callback_data=f"apv|reject|{user_id}")
-    )
+    markup.row(InlineKeyboardButton("Bronze", callback_data=f"apv|bronze|{user_id}"), InlineKeyboardButton("Silver", callback_data=f"apv|silver|{user_id}"))
+    markup.row(InlineKeyboardButton("Gold", callback_data=f"apv|gold|{user_id}"), InlineKeyboardButton("Platinum", callback_data=f"apv|platinum|{user_id}"))
+    markup.row(InlineKeyboardButton("Heroic", callback_data=f"apv|heroic|{user_id}"), InlineKeyboardButton("Master", callback_data=f"apv|master|{user_id}"))
+    markup.row(InlineKeyboardButton("Membership", callback_data=f"apv|membership|{user_id}"), InlineKeyboardButton("❌ Reject", callback_data=f"apv|reject|{user_id}"))
 
-    caption = f"💳 **AURA Upgrade Request!**\n\n👤 User: {name} (`{user_id}`)\n🔢 TrxID / Number: `{trxid}`"
+    caption = f"💳 **AURA Authorization Request!**\n\n👤 Node: {name} (`{user_id}`)\n🔢 TrxID / ID: `{trxid}`"
     bot.send_photo(OWNER_ID, file_id, caption=caption, reply_markup=markup, parse_mode="Markdown")
-    bot.reply_to(message, "✅ Request transmitted to Supreme Commander. Your rank will update shortly!")
+    bot.reply_to(message, "✅ Request forwarded directly to the Supreme Commander. Authorization pending.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('apv|'))
 def admin_approve_payment(call):
     if call.from_user.id != OWNER_ID:
-        return bot.answer_callback_query(call.id, "🚫 UNAUTHORIZED!", show_alert=True)
+        return bot.answer_callback_query(call.id, "🚫 OVERRIDE DENIED!", show_alert=True)
         
     parts = call.data.split('|')
     action = parts[1]
@@ -503,15 +529,15 @@ def admin_approve_payment(call):
     target_user = get_user(db, target_id)
     
     if action == 'reject':
-        bot.send_message(target_id, "❌ Upgrade failed. The Supreme Commander has rejected your transaction.")
-        bot.answer_callback_query(call.id, "Rejected!")
+        bot.send_message(target_id, "❌ Upgrade sequence failed. The Supreme Commander has rejected the ledger entry.")
+        bot.answer_callback_query(call.id, "Ledger Rejected!")
         bot.edit_message_caption(f"{call.message.caption}\n\n❌ **STATUS: REJECTED**", call.message.chat.id, call.message.message_id)
     else:
         target_user.role = action
         target_user.role_expires_at = datetime.now() + timedelta(days=30) 
         db.commit()
-        bot.send_message(target_id, f"🎉 **Clearance Updated!** Your transaction was successful.\nYou are now holding **{action.capitalize()}** rank in the AURA network.")
-        bot.answer_callback_query(call.id, f"Approved as {action}!")
+        bot.send_message(target_id, f"🎉 **Clearance Granted!** Your transaction was successful.\nYou now wield **{action.capitalize()}** rank within the AURA grid.")
+        bot.answer_callback_query(call.id, f"Approved as {action.capitalize()}!")
         bot.edit_message_caption(f"{call.message.caption}\n\n✅ **STATUS: APPROVED ({action.upper()})**", call.message.chat.id, call.message.message_id)
     db.close()
 
@@ -560,7 +586,7 @@ def cmd_maintenance_on(message):
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     global MAINTENANCE
     MAINTENANCE = True
-    bot.reply_to(message, "🔴 **Maintenance Mode:** `ON`\nOnly the Supreme Commander can use the bot now.", parse_mode="Markdown")
+    bot.reply_to(message, "🔴 **Maintenance Override:** `ACTIVE`\nAll non-essential nodes are now locked out.", parse_mode="Markdown")
 
 @bot.message_handler(commands=['maintenanceoff'])
 def cmd_maintenance_off(message):
@@ -568,7 +594,7 @@ def cmd_maintenance_off(message):
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     global MAINTENANCE
     MAINTENANCE = False
-    bot.reply_to(message, "🟢 **Maintenance Mode:** `OFF`\nAll citizens can now access the AURA network.", parse_mode="Markdown")
+    bot.reply_to(message, "🟢 **Maintenance Override:** `DISABLED`\nAURA Grid restored for public access.", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text and m.text.startswith('/gencode'))
 def generate_code_cmd(message):
@@ -586,7 +612,7 @@ def generate_code_cmd(message):
     
     try:
         role = parts[1].lower()
-        if role not in ['silver', 'gold', 'diamond']: 
+        if role not in LIMITS: 
             raise ValueError
         hours = int(parts[2])
         expires_at = datetime.now() + timedelta(hours=hours)
@@ -607,17 +633,17 @@ def generate_code_cmd(message):
         
         if count <= 15:
             codes_str = "\n".join([f"`{c}`" for c in generated_codes])
-            bot.reply_to(message, f"🎁 **{count} Overrides Generated!**\n\n👑 Rank: `{role.capitalize()}`\n⏳ Validity: `{hours} Hours`\n\n{codes_str}", parse_mode="Markdown")
+            bot.reply_to(message, f"🎁 **{count} Authorization Keys Generated!**\n\n👑 Role: `{role.capitalize()}`\n⏳ Lifespan: `{hours} Hours`\n\n{codes_str}", parse_mode="Markdown")
         else:
-            file_name = f"AURA_Codes_{role.upper()}_{count}.txt"
+            file_name = f"AURA_Keys_{role.upper()}_{count}.txt"
             with open(file_name, "w") as f:
                 f.write("\n".join(generated_codes))
             with open(file_name, "rb") as f:
-                bot.send_document(message.chat.id, f, caption=f"🎁 **{count} Overrides Generated!**\n👑 Rank: `{role.capitalize()}`\n⏳ Validity: `{hours} Hours`", parse_mode="Markdown")
+                bot.send_document(message.chat.id, f, caption=f"🎁 **{count} Keys Generated!**\n👑 Role: `{role.capitalize()}`\n⏳ Lifespan: `{hours} Hours`", parse_mode="Markdown")
             os.remove(file_name)
             
     except Exception as e:
-        bot.reply_to(message, f"❌ Error: Syntax failure. Example: `/gencode100 diamond 48`", parse_mode="Markdown")
+        bot.reply_to(message, f"❌ Validation Error: Ensure the role exists. Example: `/gencode100 heroic 48`", parse_mode="Markdown")
 
 @bot.message_handler(commands=['redeem'])
 def redeem_cmd(message):
@@ -636,17 +662,17 @@ def redeem_cmd(message):
     
     if user.last_code_used and user.last_code_used.date() == datetime.now().date():
         db.close()
-        return bot.reply_to(message, "❌ You have already executed a redeem sequence today. Try again tomorrow.")
+        return bot.reply_to(message, "❌ Your system has already accepted an injection code today. Return tomorrow.")
 
     code_in = parts[1].strip()
     c = db.query(RedeemCode).filter(RedeemCode.code == code_in).first()
     
     if not c:
-        bot.reply_to(message, "❌ Invalid Override Code.")
+        bot.reply_to(message, "❌ Invalid Cipher.")
     elif c.is_used:
-        bot.reply_to(message, "❌ This sequence has already been compromised by another user.")
+        bot.reply_to(message, "❌ This cipher has already been compromised by another entity.")
     elif c.expires_at and datetime.now() > c.expires_at:
-        bot.reply_to(message, "❌ Code lifespan has expired!")
+        bot.reply_to(message, "❌ The code's digital decay is complete. It has expired!")
     else:
         user.role = c.role_granted
         user.role_expires_at = datetime.now() + timedelta(days=1)
@@ -654,7 +680,7 @@ def redeem_cmd(message):
         user.daily_downloads = 0
         c.is_used = True
         db.commit()
-        bot.reply_to(message, f"✅ **AURA Matrix Updated!**\nYou are now running the **{c.role_granted.capitalize()}** protocol for 24 hours.")
+        bot.reply_to(message, f"✅ **AURA Core Refreshed!**\nYou are now operating with **{c.role_granted.capitalize()}** parameters for 24 hours.")
     db.close()
 
 @bot.message_handler(commands=['gift'])
@@ -677,9 +703,9 @@ def gift_cmd(message):
             u.daily_downloads = 0
             db.commit()
             bot.reply_to(message, f"✅ Gifted **{role.capitalize()}** to {user_id} for {days} days.")
-            bot.send_message(user_id, f"🎁 **AURA Supply Drop!**\nThe Supreme Commander has granted you **{role.capitalize()}** clearance for {days} days.")
+            bot.send_message(user_id, f"🎁 **AURA Supply Drop Received!**\nThe Supreme Commander has elevated your rank to **{role.capitalize()}** for {days} days.")
         else:
-            bot.reply_to(message, "❌ ID not found in the matrix.")
+            bot.reply_to(message, "❌ UUID not found in the directory.")
         db.close()
     except:
         bot.reply_to(message, "Use: `/gift [ID] [role] [days]`", parse_mode="Markdown")
@@ -689,9 +715,9 @@ def ping_cmd(message):
     if message.from_user.id != OWNER_ID:
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     start_time = time.time()
-    msg = bot.reply_to(message, "Pinging Core...")
+    msg = bot.reply_to(message, "Pinging Matrix...")
     end_time = time.time()
-    bot.edit_message_text(f"🏓 **AURA Latency**\nResponse Time: `{round((end_time - start_time) * 1000)}ms`\nStatus: 🟢 ONLINE", msg.chat.id, msg.message_id, parse_mode="Markdown")
+    bot.edit_message_text(f"🏓 **AURA Node Latency**\nEcho Response: `{round((end_time - start_time) * 1000)}ms`\nStatus: 🟢 OPTIMAL", msg.chat.id, msg.message_id, parse_mode="Markdown")
 
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
@@ -699,7 +725,7 @@ def admin_panel(message):
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     markup = InlineKeyboardMarkup()
     markup.row(
-        InlineKeyboardButton("📊 Core Stats", callback_data="admin_stats"), 
+        InlineKeyboardButton("📊 Core Diagnostics", callback_data="admin_stats"), 
         InlineKeyboardButton("🛠 Maint. Protocol", callback_data="admin_maint")
     )
     bot.reply_to(message, "🌌 **AURA Control Interface**", reply_markup=markup, parse_mode="Markdown")
@@ -717,12 +743,12 @@ def admin_callbacks(call):
         db.close()
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
-        text = f"📊 **AURA Diagnostics**\n👥 Nodes: {users}\n📥 Extracted: {dls}\n🖥 CPU: {cpu}% | RAM: {ram}%"
+        text = f"📊 **AURA Core Vitals**\n👥 Registered Nodes: {users}\n📥 Extractions: {dls}\n🖥 CPU: {cpu}% | RAM: {ram}%"
         bot.answer_callback_query(call.id)
         
         markup = InlineKeyboardMarkup()
         markup.row(
-            InlineKeyboardButton("📊 Core Stats", callback_data="admin_stats"), 
+            InlineKeyboardButton("📊 Core Diagnostics", callback_data="admin_stats"), 
             InlineKeyboardButton("🛠 Maint. Protocol", callback_data="admin_maint")
         )
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
@@ -731,7 +757,7 @@ def admin_callbacks(call):
         global MAINTENANCE
         MAINTENANCE = not MAINTENANCE
         status = "ON 🔴" if MAINTENANCE else "OFF 🟢"
-        bot.answer_callback_query(call.id, f"Maintenance is now {status}", show_alert=True)
+        bot.answer_callback_query(call.id, f"Maintenance shift set to {status}", show_alert=True)
 
 @bot.message_handler(commands=['search'])
 def search_user(message):
@@ -743,9 +769,9 @@ def search_user(message):
         u = db.query(User).filter(User.id == user_id).first()
         db.close()
         if u:
-            bot.reply_to(message, f"🔍 **Node Identity:**\nName: {u.name}\nID: `{u.id}`\nRank: {u.role}\nDLs: {u.total_downloads}\nBlacklisted: {u.is_banned}", parse_mode="Markdown")
+            bot.reply_to(message, f"🔍 **Node Fingerprint:**\nDesignation: {u.name}\nUUID: `{u.id}`\nRank: {u.role}\nDLs: {u.total_downloads}\nBlacklist Status: {u.is_banned}", parse_mode="Markdown")
         else:
-            bot.reply_to(message, "❌ ID not found.")
+            bot.reply_to(message, "❌ Target untraceable.")
     except:
         bot.reply_to(message, "Use: `/search [ID]`", parse_mode="Markdown")
 
@@ -761,9 +787,9 @@ def ban_unban_user(message):
         if u:
             u.is_banned = (cmd == 'ban')
             db.commit()
-            bot.reply_to(message, f"✅ User {user_id} has been {cmd}ned.")
+            bot.reply_to(message, f"✅ Target {user_id} has been {cmd}ned from the matrix.")
         else:
-            bot.reply_to(message, "❌ ID not found.")
+            bot.reply_to(message, "❌ Target untraceable.")
         db.close()
     except:
         bot.reply_to(message, "Use: `/ban [ID]` or `/unban [ID]`")
@@ -786,10 +812,10 @@ def set_role_cmd(message):
             u.role_expires_at = datetime.now() + timedelta(days=30)
             u.daily_downloads = 0
             db.commit()
-            bot.reply_to(message, f"✅ Clearance updated to {role}.")
-            bot.send_message(user_id, f"🎉 Supreme Commander has upgraded your rank to **{role.capitalize()}**!")
+            bot.reply_to(message, f"✅ Target {user_id} clearance modified to {role}.")
+            bot.send_message(user_id, f"🎉 Supreme Commander override authorized. You are now designated as **{role.capitalize()}**!")
         else:
-            bot.reply_to(message, "❌ ID not found.")
+            bot.reply_to(message, "❌ Target untraceable.")
         db.close()
     except:
         bot.reply_to(message, "Use: `/setrole [ID] [role]`", parse_mode="Markdown")
@@ -807,10 +833,10 @@ def add_limit_cmd(message):
         if u:
             u.daily_downloads = max(0, u.daily_downloads - amount)
             db.commit()
-            bot.reply_to(message, f"✅ Allocated {amount} extra bandwidth to {user_id}.")
-            bot.send_message(user_id, f"🎁 Supreme Commander injected {amount} extra extractions to your node!")
+            bot.reply_to(message, f"✅ Injected {amount} extractions to {user_id}.")
+            bot.send_message(user_id, f"🎁 Supreme Commander override: Received {amount} bonus extraction allocations!")
         else:
-            bot.reply_to(message, "❌ ID not found.")
+            bot.reply_to(message, "❌ Target untraceable.")
         db.close()
     except:
         bot.reply_to(message, "Use: `/addlimit [ID] [amount]`", parse_mode="Markdown")
@@ -829,7 +855,7 @@ def export_db_cmd(message):
         writer.writerow([u.id, u.name, u.role, u.total_downloads, u.join_date.strftime("%Y-%m-%d")])
     
     csv_data.seek(0)
-    bot.send_document(message.chat.id, ('aura_users.csv', csv_data.getvalue()), caption="📊 **AURA Database Snapshot**", parse_mode="Markdown")
+    bot.send_document(message.chat.id, ('aura_users.csv', csv_data.getvalue()), caption="📊 **AURA Internal Database Dump**", parse_mode="Markdown")
     db.close()
 
 @bot.message_handler(commands=['msg'])
@@ -840,8 +866,8 @@ def direct_msg_cmd(message):
         parts = message.text.split(' ', 2)
         target_id = int(parts[1])
         text = parts[2]
-        bot.send_message(target_id, f"📩 **Secure Transmission from Commander:**\n\n{text}", parse_mode="Markdown")
-        bot.reply_to(message, "✅ Transmission successful.")
+        bot.send_message(target_id, f"📩 **HIGH PRIORITY FROM COMMANDER:**\n\n{text}", parse_mode="Markdown")
+        bot.reply_to(message, "✅ Code string delivered.")
     except:
         bot.reply_to(message, "Use: `/msg [ID] [Text]`")
 
@@ -862,13 +888,13 @@ def send_ad_cmd(message):
         success = 0
         for u in users:
             try:
-                bot.send_message(u.id, f"📢 **AURA Broadcast:**\n\n{text}", reply_markup=markup, parse_mode="Markdown")
+                bot.send_message(u.id, f"📢 **AURA SPONSOR PROTOCOL:**\n\n{text}", reply_markup=markup, parse_mode="Markdown")
                 success += 1
                 time.sleep(0.05)
             except:
                 pass
         db.close()
-        bot.reply_to(message, f"✅ Transmission delivered to {success} nodes.")
+        bot.reply_to(message, f"✅ Ad transmission confirmed to {success} nodes.")
     except:
         bot.reply_to(message, "Use: `/sendad Ad Text | Button Text | Button URL`")
 
@@ -878,22 +904,22 @@ def broadcast_cmd(message):
         return bot.reply_to(message, UNAUTH_MSG, parse_mode="Markdown")
     msg_text = message.text.replace('/broadcast', '').strip()
     if not msg_text:
-        return bot.reply_to(message, "⚠️ Execute like this: `/broadcast Hello!`", parse_mode="Markdown")
+        return bot.reply_to(message, "⚠️ Execute sequence: `/broadcast Payload!`", parse_mode="Markdown")
     
     db = SessionLocal()
     users = db.query(User).all()
-    bot.reply_to(message, f"📢 Syncing broadcast with {len(users)} nodes...")
+    bot.reply_to(message, f"📢 Routing matrix to {len(users)} instances...")
     
     success = 0
     for u in users:
         try:
-            bot.send_message(u.id, f"📢 **AURA Network Notice:**\n\n{msg_text}", parse_mode="Markdown")
+            bot.send_message(u.id, f"📢 **AURA SYSTEM ALERT:**\n\n{msg_text}", parse_mode="Markdown")
             success += 1
             time.sleep(0.05)
         except:
             pass
     db.close()
-    bot.reply_to(message, f"✅ Broadcast Complete! Sent to {success} active nodes.")
+    bot.reply_to(message, f"✅ Transmission complete. Reached {success} active units.")
 
 # --- CORE DOWNLOADER (FULLY OPTIMIZED) ---
 @bot.message_handler(regexp=r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
@@ -903,11 +929,11 @@ def handle_link(message):
         return bot.reply_to(message, MAINTENANCE_MSG, parse_mode="Markdown")
     
     if not check_force_sub(user_id):
-        return bot.reply_to(message, "⚠️ Authenticate via channel first.")
+        return bot.reply_to(message, "⚠️ Authenticate connection via channel first.")
 
     now = time.time()
     if user_id in user_cooldowns and (now - user_cooldowns[user_id]) < 3:
-        return bot.reply_to(message, "🐢 **Overload Warning!** Please wait 3 seconds before next input.", parse_mode="Markdown")
+        return bot.reply_to(message, "🐢 **System Overload!** Delay inputs by 3 seconds.", parse_mode="Markdown")
     user_cooldowns[user_id] = now
 
     db = SessionLocal()
@@ -919,12 +945,12 @@ def handle_link(message):
 
     if user.role != 'owner' and user.daily_downloads >= LIMITS[user.role]:
         limit_msg = (
-            f"❌ **Your Daily Bandwidth is completely exhausted! ({LIMITS[user.role]}/{LIMITS[user.role]})**\n\n"
-            f"💎 **UPGRADE MATRIX:**\n"
-            f"🥈 Silver (20 DL) - **{PRICING['silver']}**\n"
-            f"🥇 Gold (50 DL) - **{PRICING['gold']}**\n"
-            f"💎 Diamond (100 DL / 2GB File) - **{PRICING['diamond']}**\n\n"
-            f"Click **'💎 Get Subscriptions'** to unlock higher extraction power!"
+            f"❌ **Your Daily Bandwidth is fully utilized! ({LIMITS[user.role]}/{LIMITS[user.role]})**\n\n"
+            f"💎 **ELEVATE YOUR CLEARANCE:**\n"
+            f"🥉 Bronze - {PRICING['bronze']} | 🥈 Silver - {PRICING['silver']}\n"
+            f"🥇 Gold - {PRICING['gold']} | 💎 Platinum - {PRICING['platinum']}\n"
+            f"🔥 Heroic - {PRICING['heroic']} | 👑 Master - {PRICING['master']}\n\n"
+            f"Select **'💎 Elite Upgrades'** from the menu to secure more power!"
         )
         return bot.reply_to(message, limit_msg, parse_mode="Markdown")
 
@@ -935,11 +961,14 @@ def handle_link(message):
     
     platform = get_platform_name(url)
     
+    # Calculate Display limit dynamically based on role
+    limit_str = "2GB Raw Extraction" if user.role in ['heroic', 'master', 'membership', 'owner'] else "50MB Compressed"
+    
     text = (
-        f"🔗 *Signal Locked and Decoded!*\n\n"
-        f"📡 **Source:** `{platform}`\n"
-        f"📦 **Limit:** `50 MB Compression Enabled`\n\n"
-        f"👇 *Select your extraction method:*"
+        f"🔗 *Vector Lock Confirmed!*\n\n"
+        f"📡 **Origin:** `{platform}`\n"
+        f"📦 **Capacity:** `{limit_str}`\n\n"
+        f"👇 *Define your protocol parameters:*"
     )
     bot.reply_to(message, text, reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
 
@@ -955,16 +984,16 @@ def process_dl(call):
     url = url_storage.get(msg_id)
     
     if not url:
-        return bot.answer_callback_query(call.id, "❌ Session expired!", show_alert=True)
+        return bot.answer_callback_query(call.id, "❌ Session cache dropped!", show_alert=True)
 
     db = SessionLocal()
     user = get_user(db, call.from_user.id, call.from_user.first_name)
     
     if user.role != 'owner' and user.daily_downloads >= LIMITS[user.role]:
         db.close()
-        return bot.answer_callback_query(call.id, "❌ Limit Exceeded! Upgrade your rank.", show_alert=True)
+        return bot.answer_callback_query(call.id, "❌ Extraction Limit Met! Expand your rank.", show_alert=True)
 
-    msg = bot.edit_message_text("⏳ Requesting data...", call.message.chat.id, call.message.message_id)
+    msg = bot.edit_message_text("⏳ Syncing binary...", call.message.chat.id, call.message.message_id)
     
     loading_animation(call.message.chat.id, msg.message_id)
 
@@ -980,7 +1009,7 @@ def process_dl(call):
         'no_warnings': True,
         'ignoreerrors': False, 
         'noplaylist': True,
-        'extractor_args': {'youtube': ['player_client=android,ios,web']}, 
+        'extractor_args': {'youtube': ['player_client=android,ios,web']},
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -993,7 +1022,11 @@ def process_dl(call):
         ydl_opts['cookiefile'] = 'cookies.txt'
     
     if dl_type == 'vid':
-        ydl_opts['format'] = 'b/best/w'
+        if 'youtube.com' in url or 'youtu.be' in url:
+            ydl_opts['format'] = 'b/best/w'
+        else:
+            # 100% No-FFMPEG requirement for FB/IG/TikTok
+            ydl_opts['format'] = 'best[ext=mp4]/best/b/worst'
     elif dl_type == 'aud':
         ydl_opts['format'] = 'm4a/bestaudio/best'
 
@@ -1002,41 +1035,46 @@ def process_dl(call):
         ydl_opts['writethumbnail'] = True
 
     try:
-        bot.edit_message_text("🚀 **Uploading payload to Telegram...**\nPlease maintain connection.", call.message.chat.id, msg.message_id, parse_mode="Markdown")
+        bot.edit_message_text("🚀 **Data packet incoming to Telegram...**\nHold your interface.", call.message.chat.id, msg.message_id, parse_mode="Markdown")
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             
             if not info:
-                raise Exception("Failed to extract data. Media might be protected.")
+                raise Exception("Encryption detected. Cannot bypass file restrictions.")
 
             if dl_type == 'thumb':
                 thumb_url = info.get('thumbnail')
                 if thumb_url:
-                    bot.send_photo(call.message.chat.id, thumb_url, caption="🖼 **AURA Visuals**", parse_mode="Markdown")
+                    bot.send_photo(call.message.chat.id, thumb_url, caption="🖼 **AURA Rendering complete**", parse_mode="Markdown")
                 bot.delete_message(call.message.chat.id, msg.message_id)
                 return
 
             downloaded_files = glob.glob(f'downloads/*_{user.id}.*')
             if not downloaded_files:
-                raise Exception("Data extraction failure in local memory.")
+                raise Exception("Corrupted write access to sector memory.")
             path = downloaded_files[0]
 
             if os.path.exists(path):
                 file_size = os.path.getsize(path) / (1024 * 1024)
-                max_allowed_size = 49.5 if user.role not in ['diamond', 'owner'] else 1950.0
+                
+                # Adjust limits dynamically
+                if user.role in ['heroic', 'master', 'membership', 'owner']:
+                    max_allowed_size = 1950.0
+                else:
+                    max_allowed_size = 49.5
                 
                 if file_size > max_allowed_size and not USE_LOCAL_SERVER:
                     os.remove(path)
-                    raise Exception(f"File size limit exceeded ({round(file_size, 1)}MB). Max allowed is {max_allowed_size}MB.")
+                    raise Exception(f"Mass exceeds clearance limits ({round(file_size, 1)}MB). Permitted mass: {max_allowed_size}MB.")
 
                 bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
                 
                 with open(path, 'rb') as file:
                     if dl_type == 'aud': 
-                        bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio'), caption="⚡ **AURA CORE**")
+                        bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio Extraction'), caption="⚡ **AURA CORE**")
                     else: 
-                        bot.send_video(call.message.chat.id, file, caption="⚡ **AURA DOWNLOADER**", supports_streaming=True)
+                        bot.send_video(call.message.chat.id, file, caption="⚡ **AURA EXTRACTOR**", supports_streaming=True)
                 
                 try:
                     os.remove(path)
@@ -1052,22 +1090,22 @@ def process_dl(call):
                         pass
                 
     except Exception as e:
-        logger.error(f"Extraction Error: {traceback.format_exc()}")
+        logger.error(f"Execution Error: {traceback.format_exc()}")
         
         if user.role != 'owner' and user.daily_downloads > 0:
             user.daily_downloads -= 1
         user.total_downloads -= 1
         db.commit()
         
-        error_msg = f"❌ **Error:** {str(e)}"
+        error_msg = f"❌ **System Error:** {str(e)}"
         
-        if "size limit exceeded" in str(e):
-            error_msg = f"❌ {str(e)}\n\nPlease upgrade your AURA rank for heavier files."
-        elif "Private video" in str(e) or "Status code 403" in str(e) or "login" in str(e).lower() or "registered users" in str(e) or "bot" in str(e).lower():
-            error_msg = "❌ Target system is encrypted (Private/Blocked).\nServer requires cookies to bypass security checks."
+        if "exceeds clearance limits" in str(e):
+            error_msg = f"❌ {str(e)}\n\nUpgrade your AURA clearance for unrestricted access."
+        elif "Private video" in str(e) or "Status code 403" in str(e) or "login" in str(e).lower() or "ffmpeg is not installed" in str(e).lower() or "registered users" in str(e):
+            error_msg = "❌ Target data is shielded (Private/Requires specific server keys)."
             
         try:
-            bot.edit_message_text(f"{error_msg}\n\nBandwidth refunded to your node!", call.message.chat.id, msg.message_id)
+            bot.edit_message_text(f"{error_msg}\n\nCapacity refunded.", call.message.chat.id, msg.message_id)
         except:
             pass
             
@@ -1080,30 +1118,32 @@ def process_dl(call):
 @bot.message_handler(func=lambda m: m.text and m.from_user.id in chat_mode_users and not m.text.startswith('/'))
 def handle_ai_chat(message):
     if not DEEPSEEK_API_KEY:
-        return bot.reply_to(message, "⚠️ DeepSeek core is offline. (Admin: Initialize DEEPSEEK_API_KEY).")
+        return bot.reply_to(message, "⚠️ AI Processing module is disconnected. (Needs DEEPSEEK_API_KEY).")
         
     bot.send_chat_action(message.chat.id, 'typing')
-    
-    system_prompt = """You are 'AURA', a highly intelligent, human-like AI assistant for the AURA Downloader Bot. 
-You have real human emotions. Adapt your tone: be funny if the user is joking, serious if they need real help, and totally savage/witty if they act smart or insult you. 
-If anyone asks about your creator/owner, you must proudly say: 'My creator is Ononto Hasan! He lives in Mymensingh. He's a Computer Trainer, Designer, Developer, and a Teacher at the IST Department of BRAC SDF. He also owns the awesome Facebook page "Toxic naaa?" with over 64k+ followers!'
-If the user speaks in Bengali/Banglish, you MUST reply in Banglish. If English, reply in English. Keep it conversational and natural."""
-
     try:
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
         }
+        
+        # Owner check for special AI treatment
+        is_owner = (message.from_user.id == OWNER_ID)
+        if is_owner:
+            sys_msg = "You are the AURA Core AI. The user you are currently talking to is the Supreme Commander (The Creator/Owner of this Bot). Address him with high respect, loyalty, and futuristic vocabulary. Keep answers concise."
+        else:
+            sys_msg = "You are a helpful and friendly AI support assistant for the 'AURA Downloader Bot'. If the user asks a question in Bengali, reply in Bengali. If they ask in English, reply in English. Keep answers short and futuristic."
+            
         payload = {
             "model": "deepseek-chat",
             "messages": [
                 {
                     "role": "system", 
-                    "content": system_prompt
+                    "content": sys_msg
                 },
                 {"role": "user", "content": message.text}
             ],
-            "max_tokens": 600
+            "max_tokens": 500
         }
         
         response = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=20)
@@ -1113,15 +1153,15 @@ If the user speaks in Bengali/Banglish, you MUST reply in Banglish. If English, 
             reply = response_data["choices"][0]["message"]["content"]
             bot.reply_to(message, reply, parse_mode="Markdown")
         else:
-            logger.error(f"DeepSeek API Error: {response_data}")
-            bot.reply_to(message, "❌ Core Error: Connection to DeepSeek failed.")
+            logger.error(f"DeepSeek Logic Error: {response_data}")
+            bot.reply_to(message, "❌ AI Processor crashed. Invalid logic gate.")
             
     except Exception as e:
-        logger.error(f"DeepSeek Request Error: {e}")
-        bot.reply_to(message, "❌ The AI matrix is currently overloaded. Retry later.")
+        logger.error(f"AI Ping Error: {e}")
+        bot.reply_to(message, "❌ AI node is temporarily congested. Try again.")
 
 if __name__ == "__main__":
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
-    logger.info("AURA Core System Online!")
+    logger.info("AURA Subsystems Engaged!")
     bot.infinity_polling()
