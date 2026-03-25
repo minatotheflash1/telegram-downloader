@@ -22,7 +22,6 @@ except ImportError:
     os.system("pip install openai")
     from openai import OpenAI
 
-# The Magic Fix: Auto-installing a portable FFmpeg for Python
 try:
     import imageio_ffmpeg
 except ImportError:
@@ -990,7 +989,7 @@ def handle_link(message):
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👇 *Define your protocol parameters:*"
     )
-    # Replaying directly to the user's link message
+    # Replaying directly to the user's link message so it is never lost
     bot.reply_to(message, text, reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
@@ -1030,8 +1029,10 @@ def process_dl(call):
         'no_warnings': True,
         'ignoreerrors': False, 
         'noplaylist': True,
-        'ffmpeg_location': FFMPEG_PATH, # Utilizing internal FFmpeg
-        'extractor_args': {'youtube': ['player_client=android,ios,web']},
+        'geo_bypass': True,
+        'ffmpeg_location': FFMPEG_PATH, 
+        # ULTIMATE YT BYPASS: Pretend to be an iOS/Android device to skip bot-check
+        'extractor_args': {'youtube': ['player_client=ios,android']},
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -1044,7 +1045,6 @@ def process_dl(call):
         ydl_opts['cookiefile'] = 'cookies.txt'
     
     if dl_type == 'vid':
-        # Now powered by FFmpeg, it will always select the best possible video and audio seamlessly.
         ydl_opts['format'] = 'bestvideo+bestaudio/best'
     elif dl_type == 'aud':
         ydl_opts['format'] = 'm4a/bestaudio/best'
@@ -1101,10 +1101,7 @@ def process_dl(call):
                 
                 bot.delete_message(call.message.chat.id, msg.message_id)
                 
-                # NOTE: The auto-delete feature ONLY deletes the bot's messages, NOT the user's original link
-                if user.auto_delete:
-                    # Intentionally passing here so the original URL link stays forever
-                    pass
+                # Note: No deletion of the user's original message, so the link stays visible
                 
     except Exception as e:
         logger.error(f"Execution Error: {traceback.format_exc()}")
@@ -1118,8 +1115,8 @@ def process_dl(call):
         
         if "exceeds clearance limits" in str(e):
             error_msg = f"❌ {str(e)}\n\nUpgrade your AURA clearance for unrestricted access."
-        elif "Private video" in str(e) or "Status code 403" in str(e) or "login" in str(e).lower() or "ffmpeg is not installed" in str(e).lower() or "registered users" in str(e):
-            error_msg = "❌ Target data is shielded (Private/Requires specific server keys)."
+        elif "Private video" in str(e) or "Status code 403" in str(e) or "login" in str(e).lower() or "ffmpeg is not installed" in str(e).lower() or "bot" in str(e).lower():
+            error_msg = "❌ Target data is shielded (Private/Requires specific server keys).\nOr YouTube has temporarily blocked the host IP."
             
         try:
             bot.edit_message_text(f"{error_msg}\n\nCapacity refunded.", call.message.chat.id, msg.message_id)
@@ -1144,7 +1141,6 @@ def handle_ai_chat(message):
             "Content-Type": "application/json"
         }
         
-        # Owner check for special AI treatment
         is_owner = (message.from_user.id == OWNER_ID)
         if is_owner:
             sys_msg = "You are the AURA Core AI. The user you are currently talking to is the Supreme Commander (The Creator/Owner of this Bot). Address him with high respect, loyalty, and futuristic vocabulary. Keep answers concise."
