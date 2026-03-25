@@ -1002,6 +1002,13 @@ def process_dl(call):
     user.total_downloads += 1
     db.commit()
 
+    # ---- FIX 1: Clean old files for this user before downloading ----
+    old_files = glob.glob(f'downloads/*_{user.id}.*')
+    for f in old_files:
+        try: os.remove(f)
+        except: pass
+
+    # ---- FIX 2: Optimized yt-dlp config ----
     ydl_opts = {
         'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
         'quiet': True,
@@ -1009,26 +1016,12 @@ def process_dl(call):
         'no_warnings': True,
         'ignoreerrors': False, 
         'noplaylist': True,
-        'extractor_args': {'youtube': ['player_client=android,ios,web']},
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate'
-        }
+        # Better fallback without FFMPEG
+        'format': 'best[ext=mp4]/best' if dl_type == 'vid' else 'bestaudio/best',
     }
     
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = 'cookies.txt'
-    
-    if dl_type == 'vid':
-        if 'youtube.com' in url or 'youtu.be' in url:
-            ydl_opts['format'] = 'b/best/w'
-        else:
-            # 100% No-FFMPEG requirement for FB/IG/TikTok
-            ydl_opts['format'] = 'best[ext=mp4]/best/b/worst'
-    elif dl_type == 'aud':
-        ydl_opts['format'] = 'm4a/bestaudio/best'
 
     if dl_type == 'thumb': 
         ydl_opts['skip_download'] = True
@@ -1050,10 +1043,13 @@ def process_dl(call):
                 bot.delete_message(call.message.chat.id, msg.message_id)
                 return
 
+            # ---- FIX 3: Robust file locating ----
             downloaded_files = glob.glob(f'downloads/*_{user.id}.*')
-            if not downloaded_files:
-                raise Exception("Corrupted write access to sector memory.")
-            path = downloaded_files[0]
+            valid_files = [f for f in downloaded_files if not f.endswith('.part') and not f.endswith('.ytdl')]
+            
+            if not valid_files:
+                raise Exception("Extraction failed. File might be protected or requires cookies.")
+            path = valid_files[0]
 
             if os.path.exists(path):
                 file_size = os.path.getsize(path) / (1024 * 1024)
