@@ -9,7 +9,10 @@ import random
 import traceback
 import requests
 
-# Auto-install necessary modules
+# --- AUTO UPGRADE YT-DLP ON BOOT (Crucial for YouTube Bypass) ---
+print("Checking for yt-dlp updates to bypass YouTube restrictions...")
+os.system("pip install --upgrade yt-dlp -q")
+
 try:
     import psutil
 except ImportError:
@@ -1031,12 +1034,12 @@ def process_dl(call):
         'noplaylist': True,
         'geo_bypass': True,
         'ffmpeg_location': FFMPEG_PATH, 
-        # ULTIMATE YT BYPASS: Pretend to be an iOS/Android device to skip bot-check
-        'extractor_args': {'youtube': ['player_client=ios,android']},
+        # By passing Android specific client headers, we bypass YouTube's recent bot verification.
+        'extractor_args': {'youtube': ['player_client=android']},
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
+            'Accept-Language': 'en-US,en;q=0.5',
             'Sec-Fetch-Mode': 'navigate'
         }
     }
@@ -1045,7 +1048,10 @@ def process_dl(call):
         ydl_opts['cookiefile'] = 'cookies.txt'
     
     if dl_type == 'vid':
-        ydl_opts['format'] = 'bestvideo+bestaudio/best'
+        if 'youtube.com' in url or 'youtu.be' in url:
+            ydl_opts['format'] = 'b/best/w'
+        else:
+            ydl_opts['format'] = 'bestvideo+bestaudio/best/b/worst'
     elif dl_type == 'aud':
         ydl_opts['format'] = 'm4a/bestaudio/best'
 
@@ -1101,7 +1107,9 @@ def process_dl(call):
                 
                 bot.delete_message(call.message.chat.id, msg.message_id)
                 
-                # Note: No deletion of the user's original message, so the link stays visible
+                if user.auto_delete:
+                    # Does not delete original URL
+                    pass
                 
     except Exception as e:
         logger.error(f"Execution Error: {traceback.format_exc()}")
@@ -1115,8 +1123,10 @@ def process_dl(call):
         
         if "exceeds clearance limits" in str(e):
             error_msg = f"❌ {str(e)}\n\nUpgrade your AURA clearance for unrestricted access."
-        elif "Private video" in str(e) or "Status code 403" in str(e) or "login" in str(e).lower() or "ffmpeg is not installed" in str(e).lower() or "bot" in str(e).lower():
-            error_msg = "❌ Target data is shielded (Private/Requires specific server keys).\nOr YouTube has temporarily blocked the host IP."
+        elif "Sign in to confirm" in str(e) or "bot" in str(e).lower():
+            error_msg = "❌ Target data is shielded (YouTube Bot Check). Contact Supreme Commander to verify Node API Keys."
+        elif "Private video" in str(e) or "Status code 403" in str(e) or "login" in str(e).lower() or "ffmpeg is not installed" in str(e).lower() or "registered users" in str(e):
+            error_msg = "❌ Target data is shielded (Private/Requires specific server keys).\nOr host IP is temporarily blocked."
             
         try:
             bot.edit_message_text(f"{error_msg}\n\nCapacity refunded.", call.message.chat.id, msg.message_id)
