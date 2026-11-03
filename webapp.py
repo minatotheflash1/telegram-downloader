@@ -217,22 +217,26 @@ def ffmpeg_location():
         return None
 
 
-def yt_opts(extra, android_fallback=False, clients=None):
-    """yt-dlp options. By default the web client is used (full quality).
+def yt_opts(extra, android_fallback=False, clients=None, use_cookies=False):
+    """yt-dlp options. By default the web client is used (full quality)
+    and NO cookies are used.
 
-    If clients is given, those YouTube player clients are used instead.
-    If android_fallback is True, the android/ios/web list is used —
-    YouTube's web client now often returns 'Sign in to confirm you're
-    not a bot' from datacentre IPs (e.g. Vercel), and the android
-    client bypasses that check for public videos. If a video still
-    needs login, a cookies.txt next to webapp.py (owner's own cookies)
-    is used.
+    Cookies are opt-in (use_cookies=True) because a logged-in cookie
+    can actually HURT: tested 2026-11-03, a youtube.com cookies.txt
+    made YouTube return ONLY storyboard formats (mhtml) and no video
+    formats at all, for every video tested, while no-cookie android
+    returned the video fine. So cookies must only ever be a last
+    resort, never the first attempt. If clients is given, those
+    YouTube player clients are used instead.
     """
     opts = dict(extra)
     if clients is not None:
         opts["extractor_args"] = {"youtube": {"player_client": clients}}
     elif android_fallback:
         opts["extractor_args"] = {"youtube": {"player_client": ["android", "ios", "web"]}}
+    if not use_cookies:
+        opts.pop("cookiefile", None)
+        return opts
     # Cookies, in priority order: cookies.txt file, then cookies saved
     # in the DB via /cookies (this is what makes Vercel work, where
     # the filesystem is ephemeral and a file upload would not persist).
@@ -271,15 +275,22 @@ def _is_retryable(exc):
 
 
 def extract_with_fallback(opts, url, download):
-    """Try clients one by one: web first (full quality), then android
-    alone (the client that works for most Shorts), then the
-    android/ios/web list, then web again with a different skip. Any
-    bot-check or format-not-available error moves to the next client;
-    the last error is raised if all fail."""
-    attempts = [opts,
-                yt_opts(opts, clients=["android"]),
-                yt_opts(opts, android_fallback=True),
-                yt_opts(opts, clients=["web"])]
+    """Try clients one by one, WITHOUT cookies first, then WITH cookies
+    only as a last resort (see yt_opts: cookies can return only
+    storyboards and no video formats). Order: web, android alone (the
+    client that works for most Shorts), android/ios/web list, web
+    again — each first without cookies, then the same set with cookies
+    if a cookie source exists. Any bot-check or format-not-available
+    error moves to the next attempt; the last error is raised."""
+    base = dict(opts)
+    base.pop("cookiefile", None)
+    attempts = []
+    for clients in [None, ["android"], ["android", "ios", "web"], ["web"]]:
+        attempts.append(yt_opts(base, clients=clients, use_cookies=False))
+    cookie_probe = yt_opts(base, use_cookies=True)
+    if "cookiefile" in cookie_probe:
+        for clients in [None, ["android"], ["android", "ios", "web"]]:
+            attempts.append(yt_opts(base, clients=clients, use_cookies=True))
     last_exc = None
     for attempt in attempts:
         try:
