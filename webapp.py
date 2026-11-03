@@ -431,7 +431,24 @@ def download():
             # on videos whose format list is incomplete (YouTube 429 / no JS runtime).
             opts.pop("format", None)
             opts["skip_download"] = True
-        info = extract_with_fallback(opts, url, download=(fmt != "thumb"))
+        try:
+            info = extract_with_fallback(opts, url, download=(fmt != "thumb"))
+        except Exception as exc:
+            # Postprocessing conversion failure is common on serverless:
+            # merge to MP4 or MP3 conversion fails (ffmpeg/ffprobe
+            # mismatch, odd codec, etc.) even though the source streams
+            # downloaded fine. Retry once WITHOUT any postprocessing,
+            # so the user still gets a playable file instead of an
+            # error page: a single combined file for video, or the
+            # original audio file (webm/m4a, not MP3) for audio.
+            msg = str(exc).lower()
+            if fmt == "thumb" or ("postprocessing" not in msg and "conversion failed" not in msg and "ffmpeg" not in msg):
+                raise
+            retry = dict(opts)
+            retry["format"] = "best"
+            retry["merge_output_format"] = None
+            retry.pop("postprocessors", None)
+            info = extract_with_fallback(retry, url, download=True)
         if not info:
             raise Exception("Could not read this link.")
         if fmt == "thumb":
@@ -477,7 +494,9 @@ def download():
                 except Exception:
                     pass
         msg = str(exc)
-        if _is_bot_error(exc):
+        if "postprocessing" in msg.lower() or "conversion failed" in msg.lower():
+            msg = "Video/audio convert korte giye fail hoyeche (server-e ffmpeg problem). Onno quality/format try koro, ba Thumbnail try koro — ar ei video-r link-ta admin-ke janale check kora jabe."
+        elif _is_bot_error(exc):
             msg = "YouTube ei video-r jonno bot-check chaiche (login chara khola jacche na). Admin /cookies page-e nijer YouTube cookies save korle khulbe, na hole local/PC version-e try koro."
         elif "Requested format is not available" in msg:
             msg = "That quality/format is not available for this video. Press 'Check available quality & format' first and pick only a shown option."
@@ -614,6 +633,11 @@ def history():
         rows = con.execute("SELECT * FROM web_history WHERE user_id=? ORDER BY id DESC LIMIT 50", (u["id"],)).fetchall()
         con.close()
     return render_template("history.html", **ctx(rows=rows))
+
+
+@app.route("/about")
+def about():
+    return render_template("about.html", **ctx())
 
 
 @app.route("/plans")
