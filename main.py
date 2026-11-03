@@ -282,6 +282,7 @@ def get_link_info(url):
         'quiet': True, 'no_warnings': True, 'noplaylist': True,
         'skip_download': True, 'socket_timeout': 60, 'retries': 3,
         'nocheckcertificate': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'web']}},
         'extractor_retries': 3,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',

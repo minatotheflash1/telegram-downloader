@@ -23,7 +23,11 @@ from flask import Flask, after_this_request, jsonify, redirect, render_template,
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE, "data", "bot.db")
 WEB_DB = os.path.join(BASE, "data", "web.db")
-WEB_DL_DIR = os.path.join(BASE, "web_downloads")
+# Vercel's filesystem is read-only except /tmp, so downloads must go
+# there — using BASE/web_downloads caused a 500 before any download
+# code ran. /tmp works locally too; files are deleted after each request.
+import tempfile
+WEB_DL_DIR = os.path.join(tempfile.gettempdir(), "web_downloads")
 MAX_WEB_MB = 49.5
 TELEGRAM_BOT = "shortsgen_ai_bot"
 SITE_NAME = "Minato Downloader"
@@ -95,6 +99,7 @@ def web_db():
         CREATE TABLE IF NOT EXISTS web_favs(id SERIAL PRIMARY KEY, user_id INTEGER, url TEXT, created TEXT);
         CREATE TABLE IF NOT EXISTS web_claims(id SERIAL PRIMARY KEY, user_id INTEGER, day TEXT, UNIQUE(user_id, day));
         CREATE TABLE IF NOT EXISTS web_redeems(id SERIAL PRIMARY KEY, user_id INTEGER, code TEXT, UNIQUE(user_id, code));
+        CREATE TABLE IF NOT EXISTS web_cookies(id SERIAL PRIMARY KEY, content TEXT, updated TEXT);
         """)
         con.commit()
         return _Conn(con, True)
@@ -107,6 +112,7 @@ def web_db():
     CREATE TABLE IF NOT EXISTS web_favs(id INTEGER PRIMARY KEY, user_id INTEGER, url TEXT, created TEXT);
     CREATE TABLE IF NOT EXISTS web_claims(id INTEGER PRIMARY KEY, user_id INTEGER, day TEXT, UNIQUE(user_id, day));
     CREATE TABLE IF NOT EXISTS web_redeems(id INTEGER PRIMARY KEY, user_id INTEGER, code TEXT, UNIQUE(user_id, code));
+    CREATE TABLE IF NOT EXISTS web_cookies(id INTEGER PRIMARY KEY, content TEXT, updated TEXT);
     """)
     con.commit()
     # Wrap sqlite in the same unified interface
@@ -185,6 +191,85 @@ def hash_pw(pw):
     return hashlib.sha256(("shortsgen:" + pw).encode()).hexdigest()
 
 
+def ffmpeg_location():
+    """Return a directory with an ffmpeg binary, or None.
+
+    Local/PC installs usually have system ffmpeg. Vercel does not, so
+    the imageio-ffmpeg pip package (installed from requirements.txt)
+    provides a bundled binary there. Without this, video+audio merge
+    and MP3 conversion are impossible on Vercel — YouTube videos like
+    Rick Astley have no combined MP4 format at all."""
+    import shutil
+    if shutil.which("ffmpeg"):
+        return None
+    try:
+        import imageio_ffmpeg
+        # yt-dlp looks for an executable literally named "ffmpeg" in
+        # ffmpeg_location, but imageio's binary is named
+        # ffmpeg-linux-x86_64-... — so copy it to /tmp/ffmpeg first.
+        src = imageio_ffmpeg.get_ffmpeg_exe()
+        dst = os.path.join(tempfile.gettempdir(), "ffmpeg")
+        if not os.path.exists(dst) or os.path.getsize(dst) != os.path.getsize(src):
+            shutil.copyfile(src, dst)
+            os.chmod(dst, 0o755)
+        return tempfile.gettempdir()
+    except Exception:
+        return None
+
+
+def yt_opts(extra, android_fallback=False):
+    """yt-dlp options. By default the web client is used (full quality).
+
+    If android_fallback is True, the android/ios player clients are
+    used instead — YouTube's web client now often returns 'Sign in to
+    confirm you're not a bot' from datacentre IPs (e.g. Vercel), and
+    the android/ios clients bypass that check for public videos.
+    If a video still needs login, a cookies.txt next to webapp.py
+    (owner's own cookies) is used.
+    """
+    opts = dict(extra)
+    if android_fallback:
+        opts["extractor_args"] = {"youtube": {"player_client": ["android", "ios", "web"]}}
+    # Cookies, in priority order: cookies.txt file, then cookies saved
+    # in the DB via /cookies (this is what makes Vercel work, where
+    # the filesystem is ephemeral and a file upload would not persist).
+    if os.path.exists(os.path.join(BASE, "cookies.txt")):
+        opts["cookiefile"] = os.path.join(BASE, "cookies.txt")
+    else:
+        try:
+            con = web_db()
+            row = con.execute("SELECT content FROM web_cookies ORDER BY id DESC LIMIT 1").fetchone()
+            con.close()
+            if row and row["content"]:
+                import tempfile
+                path = os.path.join(tempfile.gettempdir(), "minato-cookies.txt")
+                with open(path, "w") as f:
+                    f.write(row["content"])
+                opts["cookiefile"] = path
+        except Exception:
+            pass
+    return opts
+
+
+def _is_bot_error(exc):
+    msg = str(exc).lower()
+    return "not a bot" in msg or "sign in to confirm" in msg
+
+
+def extract_with_fallback(opts, url, download):
+    """Try web client first (full quality); on YouTube bot-check,
+    retry once with android/ios clients."""
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=download)
+    except Exception as exc:
+        if not _is_bot_error(exc):
+            raise
+        fallback = yt_opts(opts, android_fallback=True)
+        with yt_dlp.YoutubeDL(fallback) as ydl:
+            return ydl.extract_info(url, download=download)
+
+
 def extract_pin_image(url):
     """Fallback for Pinterest image pins: yt-dlp fails with 'No video formats
     found!' on image-only pins, so pull the largest pinimg image from the pin page."""
@@ -226,14 +311,13 @@ def api_formats():
     url = (data.get("url") or "").strip()
     if not url.startswith("http"):
         return jsonify({"error": "Please paste a full http(s) link."}), 400
-    opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "skip_download": True,
-            "nocheckcertificate": True, "socket_timeout": 60}
-    if os.path.exists(os.path.join(BASE, "cookies.txt")):
-        opts["cookiefile"] = os.path.join(BASE, "cookies.txt")
+    opts = yt_opts({"quiet": True, "no_warnings": True, "noplaylist": True, "skip_download": True,
+                    "nocheckcertificate": True, "socket_timeout": 60})
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        info = extract_with_fallback(opts, url, download=False)
     except Exception as exc:
+        if _is_bot_error(exc):
+            return jsonify({"error": "YouTube ei video-r jonno bot-check chaiche (login chara khola jacche na). Eta login/age-restricted ba YouTube-er IP block hote pare — nijer YouTube cookies (cookies.txt) dile tobei khulbe."}), 400
         pin_img = extract_pin_image(url)
         if pin_img:
             return jsonify({"title": "Pinterest image pin", "qualities": [],
@@ -268,77 +352,85 @@ def download():
     if u and u["today"] >= u["daily_limit"]:
         return render_template("index.html", **ctx(error=f"Daily web limit reached ({u['daily_limit']}/day for {u['plan']}). Try again tomorrow, or use the Telegram bot.")), 400
     dl_dir = os.path.join(WEB_DL_DIR, uuid.uuid4().hex[:12])
-    os.makedirs(dl_dir, exist_ok=True)
 
     @after_this_request
     def _cleanup(response):
         shutil.rmtree(dl_dir, ignore_errors=True)
         return response
 
-    # Converter logic: quality cap only if it is a number; 'best' = no cap.
-    cap = f"[height<={quality}]" if quality.isdigit() else ""
-    if fmt == "vid":
-        fmt_str = f"bestvideo{cap}[ext=mp4]+bestaudio/bestvideo{cap}+bestaudio/bestvideo+bestaudio/best"
-        merge = "mp4"
-    elif fmt == "aud":
-        fmt_str = "bestaudio/best"
-        merge = None
-    else:
-        fmt_str = "best"
-        merge = None
-    opts = {"outtmpl": os.path.join(dl_dir, "%(id)s.%(ext)s"), "quiet": True, "no_warnings": True,
-            "noplaylist": True, "nocheckcertificate": True, "socket_timeout": 120,
-            "retries": 10, "fragment_retries": 10, "extractor_retries": 5,
-            "format": fmt_str, "merge_output_format": merge}
-    if fmt == "aud" and shutil.which("ffmpeg"):
-        opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
-    if fmt == "thumb":
-        # Thumbnail needs metadata only: setting a format makes yt-dlp fail
-        # on videos whose format list is incomplete (YouTube 429 / no JS runtime).
-        opts.pop("format", None)
-        opts["skip_download"] = True
-    if os.path.exists(os.path.join(BASE, "cookies.txt")):
-        opts["cookiefile"] = os.path.join(BASE, "cookies.txt")
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=(fmt != "thumb"))
-            if not info:
-                raise Exception("Could not read this link.")
-            if fmt == "thumb":
-                thumb = info.get("thumbnail")
-                if not thumb:
-                    raise Exception("No thumbnail found for this link.")
-                import requests
-                resp = requests.get(thumb, timeout=30)
-                resp.raise_for_status()
-                path = os.path.join(dl_dir, "thumbnail.jpg")
-                with open(path, "wb") as f:
-                    f.write(resp.content)
-                if u:
-                    con = web_db()
-                    from datetime import datetime as _dt
-                    con.execute("INSERT INTO web_history(user_id,url,title,fmt,size_mb,created) VALUES(?,?,?,?,?,?)",
-                                (u["id"], url, info.get("title") or "", "thumb", round(len(resp.content) / (1024 * 1024), 2), _dt.now().strftime("%Y-%m-%d %H:%M:%S")))
-                    con.commit()
-                    con.close()
-                return send_file(path, as_attachment=True, download_name="thumbnail.jpg")
-            files = [f for f in glob.glob(os.path.join(dl_dir, "*")) if not f.endswith((".part", ".ytdl", ".tmp"))]
-            files = [f for f in files if not f.lower().endswith((".jpg", ".png", ".webp"))]
-            if not files:
-                raise Exception("Download failed - no file was produced.")
-            path = max(files, key=os.path.getsize)
-            size_mb = os.path.getsize(path) / (1024 * 1024)
-            if size_mb > MAX_WEB_MB:
-                raise Exception(f"File is {size_mb:.1f} MB, over the {MAX_WEB_MB} MB web limit. Use the Telegram bot for larger files if your plan allows it.")
+        os.makedirs(dl_dir, exist_ok=True)
+        # Converter logic: quality cap only if it is a number; 'best' = no cap.
+        cap = f"[height<={quality}]" if quality.isdigit() else ""
+        _ffloc = ffmpeg_location()
+        has_ffmpeg = bool(shutil.which("ffmpeg")) or bool(_ffloc)
+        if fmt == "vid":
+            # Merge format is required: most YouTube videos have no
+            # combined video+audio file. Without ffmpeg this fails
+            # honestly instead of returning a silent video-only file.
+            fmt_str = f"bestvideo{cap}[ext=mp4]+bestaudio/bestvideo{cap}+bestaudio/bestvideo+bestaudio/best"
+            merge = "mp4"
+        elif fmt == "aud":
+            fmt_str = "bestaudio/best"
+            merge = None
+        else:
+            fmt_str = "best"
+            merge = None
+        opts = yt_opts({"outtmpl": os.path.join(dl_dir, "%(id)s.%(ext)s"), "quiet": True, "no_warnings": True,
+                        "noplaylist": True, "nocheckcertificate": True, "socket_timeout": 120,
+                        "retries": 10, "fragment_retries": 10, "extractor_retries": 5,
+                        "format": fmt_str, "merge_output_format": merge})
+        if _ffloc:
+            opts["ffmpeg_location"] = _ffloc
+        if fmt == "aud" and has_ffmpeg:
+            opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
+        if fmt == "thumb":
+            # Thumbnail needs metadata only: setting a format makes yt-dlp fail
+            # on videos whose format list is incomplete (YouTube 429 / no JS runtime).
+            opts.pop("format", None)
+            opts["skip_download"] = True
+        info = extract_with_fallback(opts, url, download=(fmt != "thumb"))
+        if not info:
+            raise Exception("Could not read this link.")
+        if fmt == "thumb":
+            thumb = info.get("thumbnail")
+            if not thumb:
+                raise Exception("No thumbnail found for this link.")
+            import requests
+            resp = requests.get(thumb, timeout=30)
+            resp.raise_for_status()
+            data = resp.content
             if u:
                 con = web_db()
                 from datetime import datetime as _dt
                 con.execute("INSERT INTO web_history(user_id,url,title,fmt,size_mb,created) VALUES(?,?,?,?,?,?)",
-                            (u["id"], url, info.get("title") or "", fmt, round(size_mb, 2), _dt.now().strftime("%Y-%m-%d %H:%M:%S")))
+                            (u["id"], url, info.get("title") or "", "thumb", round(len(data) / (1024 * 1024), 2), _dt.now().strftime("%Y-%m-%d %H:%M:%S")))
                 con.commit()
                 con.close()
-            name = f"{info.get('title') or 'download'}"[:80].strip() + os.path.splitext(path)[1]
-            return send_file(path, as_attachment=True, download_name=name)
+            from io import BytesIO
+            return send_file(BytesIO(data), as_attachment=True, download_name="thumbnail.jpg")
+        files = [f for f in glob.glob(os.path.join(dl_dir, "*")) if not f.endswith((".part", ".ytdl", ".tmp"))]
+        files = [f for f in files if not f.lower().endswith((".jpg", ".png", ".webp"))]
+        if not files:
+            raise Exception("Download failed - no file was produced.")
+        path = max(files, key=os.path.getsize)
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+        if size_mb > MAX_WEB_MB:
+            raise Exception(f"File is {size_mb:.1f} MB, over the {MAX_WEB_MB} MB web limit. Use the Telegram bot for larger files if your plan allows it.")
+        if u:
+            con = web_db()
+            from datetime import datetime as _dt
+            con.execute("INSERT INTO web_history(user_id,url,title,fmt,size_mb,created) VALUES(?,?,?,?,?,?)",
+                        (u["id"], url, info.get("title") or "", fmt, round(size_mb, 2), _dt.now().strftime("%Y-%m-%d %H:%M:%S")))
+            con.commit()
+            con.close()
+        name = f"{info.get('title') or 'download'}"[:80].strip() + os.path.splitext(path)[1]
+        # Read into memory first: the cleanup hook deletes dl_dir, and
+        # on serverless the file may be gone before the body is sent.
+        with open(path, "rb") as f:
+            data = f.read()
+        from io import BytesIO
+        return send_file(BytesIO(data), as_attachment=True, download_name=name)
     except Exception as exc:
         if fmt == "thumb":
             pin_img = extract_pin_image(url)
@@ -361,7 +453,9 @@ def download():
                 except Exception:
                     pass
         msg = str(exc)
-        if "Requested format is not available" in msg:
+        if _is_bot_error(exc):
+            msg = "YouTube ei video-r jonno bot-check chaiche (login chara khola jacche na). Admin /cookies page-e nijer YouTube cookies save korle khulbe, na hole local/PC version-e try koro."
+        elif "Requested format is not available" in msg:
             msg = "That quality/format is not available for this video. Press 'Check available quality & format' first and pick only a shown option."
         elif "timed out" in msg.lower():
             msg = "The site took too long to respond. Try again in a bit."
@@ -493,6 +587,43 @@ def history():
 @app.route("/plans")
 def plans():
     return render_template("plans.html", **ctx())
+
+
+@app.route("/cookies", methods=["GET", "POST"])
+def cookies_page():
+    """Admin-only: save the owner's own YouTube cookies (Netscape
+    cookies.txt format) into the DB so Vercel downloads can use them.
+
+    Cookies are sensitive — never share someone else's, and if they
+    leak, log out everywhere / change the password. Only the admin
+    account can see or set this page; the cookie content is never
+    shown back, only whether one is saved."""
+    u = current_user()
+    if not u or not u["is_admin"]:
+        return redirect(url_for("login"))
+    saved = False
+    try:
+        con = web_db()
+        saved = bool(con.execute("SELECT content FROM web_cookies LIMIT 1").fetchone())
+        con.close()
+    except Exception:
+        pass
+    if request.method == "POST":
+        content = ""
+        if "file" in request.files and request.files["file"].filename:
+            content = request.files["file"].read().decode(errors="ignore")
+        elif request.form.get("content"):
+            content = request.form["content"]
+        if not content.strip() or "youtube" not in content.lower():
+            return render_template("cookies.html", **ctx(saved=saved, error="Cookies file-ta thik na — YouTube cookies.txt (Netscape format) dao.")), 400
+        con = web_db()
+        from datetime import datetime as _dt
+        con.execute("DELETE FROM web_cookies")
+        con.execute("INSERT INTO web_cookies(content, updated) VALUES(?, ?)", (content, _dt.now().isoformat()))
+        con.commit()
+        con.close()
+        return render_template("cookies.html", **ctx(saved=True, ok="Cookies save hoyeche. Ekhon YouTube link abar try koro."))
+    return render_template("cookies.html", **ctx(saved=saved))
 
 
 @app.route("/admin")

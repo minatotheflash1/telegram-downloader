@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>YouTube Cookies</h2>
+  <p class="small">YouTube jokhon bot-check chay, tokhon nijer YouTube account-er cookies dile download khole. Eta sudhu admin-er jonno. Cookies kokhono kauke dio na, leak hole sob jaygay log out kore password change koro.</p>
+  <p class="small">Cookies status: <strong>{% if saved %}Saved{% else %}Not saved{% endif %}</strong></p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if ok %}<p class="ok">{{ ok }}</p>{% endif %}
+  <form method="post" enctype="multipart/form-data">
+    <label>cookies.txt file upload koro (Get cookies.txt LOCALLY extension diye export kora):</label>
+    <input type="file" name="file" accept=".txt">
+    <p class="small">Ba niche paste koro:</p>
+    <textarea name="content" rows="6" placeholder="# Netscape HTTP Cookie File"></textarea>
+    <button type="submit">Save cookies</button>
+  </form>
+  <p class="small">Steps: Chrome/Firefox-e YouTube-e login koro → Get cookies.txt LOCALLY extension diye youtube.com-er cookies export koro → ekhane upload koro.</p>
+</div>
+{% endblock %}
