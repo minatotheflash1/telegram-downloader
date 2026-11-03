@@ -217,18 +217,21 @@ def ffmpeg_location():
         return None
 
 
-def yt_opts(extra, android_fallback=False):
+def yt_opts(extra, android_fallback=False, clients=None):
     """yt-dlp options. By default the web client is used (full quality).
 
-    If android_fallback is True, the android/ios player clients are
-    used instead — YouTube's web client now often returns 'Sign in to
-    confirm you're not a bot' from datacentre IPs (e.g. Vercel), and
-    the android/ios clients bypass that check for public videos.
-    If a video still needs login, a cookies.txt next to webapp.py
-    (owner's own cookies) is used.
+    If clients is given, those YouTube player clients are used instead.
+    If android_fallback is True, the android/ios/web list is used —
+    YouTube's web client now often returns 'Sign in to confirm you're
+    not a bot' from datacentre IPs (e.g. Vercel), and the android
+    client bypasses that check for public videos. If a video still
+    needs login, a cookies.txt next to webapp.py (owner's own cookies)
+    is used.
     """
     opts = dict(extra)
-    if android_fallback:
+    if clients is not None:
+        opts["extractor_args"] = {"youtube": {"player_client": clients}}
+    elif android_fallback:
         opts["extractor_args"] = {"youtube": {"player_client": ["android", "ios", "web"]}}
     # Cookies, in priority order: cookies.txt file, then cookies saved
     # in the DB via /cookies (this is what makes Vercel work, where
@@ -256,18 +259,40 @@ def _is_bot_error(exc):
     return "not a bot" in msg or "sign in to confirm" in msg
 
 
+def _is_retryable(exc):
+    """Bot-check and 'format not available' are both retryable with a
+    different player client. Shorts are the classic case: a Shorts
+    video often has ONLY one combined format (e.g. 640p format 18),
+    no separate video/audio, and the iOS client returns no formats
+    at all — so iOS fails with 'Requested format is not available'
+    while android succeeds with that single format."""
+    msg = str(exc).lower()
+    return _is_bot_error(exc) or "requested format is not available" in msg or "format is not available" in msg
+
+
 def extract_with_fallback(opts, url, download):
-    """Try web client first (full quality); on YouTube bot-check,
-    retry once with android/ios clients."""
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            return ydl.extract_info(url, download=download)
-    except Exception as exc:
-        if not _is_bot_error(exc):
-            raise
-        fallback = yt_opts(opts, android_fallback=True)
-        with yt_dlp.YoutubeDL(fallback) as ydl:
-            return ydl.extract_info(url, download=download)
+    """Try clients one by one: web first (full quality), then android
+    alone (the client that works for most Shorts), then the
+    android/ios/web list, then web again with a different skip. Any
+    bot-check or format-not-available error moves to the next client;
+    the last error is raised if all fail."""
+    attempts = [opts,
+                yt_opts(opts, clients=["android"]),
+                yt_opts(opts, android_fallback=True),
+                yt_opts(opts, clients=["web"])]
+    last_exc = None
+    for attempt in attempts:
+        try:
+            with yt_dlp.YoutubeDL(attempt) as ydl:
+                info = ydl.extract_info(url, download=download)
+                if info:
+                    return info
+        except Exception as exc:
+            last_exc = exc
+            if not _is_retryable(exc):
+                raise
+            continue
+    raise last_exc
 
 
 def extract_pin_image(url):
@@ -318,6 +343,8 @@ def api_formats():
     except Exception as exc:
         if _is_bot_error(exc):
             return jsonify({"error": "YouTube ei video-r jonno bot-check chaiche (login chara khola jacche na). Eta login/age-restricted ba YouTube-er IP block hote pare — nijer YouTube cookies (cookies.txt) dile tobei khulbe."}), 400
+        if "format is not available" in str(exc).lower():
+            return jsonify({"error": "Ei Shorts/video-r jonno YouTube kono alada video/audio format dicche na (sudhu ekta combined format thake, ar iOS/web client-e setao ashe na). Android client diyeo khola jay ni — Vercel IP block hole nijer YouTube cookies (/cookies page) lagbe, na hole local/PC version-e try koro."}), 400
         pin_img = extract_pin_image(url)
         if pin_img:
             return jsonify({"title": "Pinterest image pin", "qualities": [],
