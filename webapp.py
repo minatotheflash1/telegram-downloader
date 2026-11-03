@@ -348,9 +348,13 @@ def download():
     quality = request.form.get("quality") or "720"
     if not url.startswith("http"):
         return render_template("index.html", **ctx(error="Please paste a full http(s) link.")), 400
+    # NOTE (2026-11-03, owner request): downloads are NOT recorded in
+    # the database at all — no web_history entry, no URL/title saved.
+    # Otherwise every download would eat DB usage and the daily-limit
+    # counter. So the daily-limit check is also disabled here: with no
+    # history to count, usage can no longer "finish" from downloads.
+    # History page / admin stats will only show older entries, if any.
     u = current_user()
-    if u and u["today"] >= u["daily_limit"]:
-        return render_template("index.html", **ctx(error=f"Daily web limit reached ({u['daily_limit']}/day for {u['plan']}). Try again tomorrow, or use the Telegram bot.")), 400
     dl_dir = os.path.join(WEB_DL_DIR, uuid.uuid4().hex[:12])
 
     @after_this_request
@@ -400,13 +404,7 @@ def download():
             resp = requests.get(thumb, timeout=30)
             resp.raise_for_status()
             data = resp.content
-            if u:
-                con = web_db()
-                from datetime import datetime as _dt
-                con.execute("INSERT INTO web_history(user_id,url,title,fmt,size_mb,created) VALUES(?,?,?,?,?,?)",
-                            (u["id"], url, info.get("title") or "", "thumb", round(len(data) / (1024 * 1024), 2), _dt.now().strftime("%Y-%m-%d %H:%M:%S")))
-                con.commit()
-                con.close()
+            # No DB entry for this download (see note above).
             from io import BytesIO
             return send_file(BytesIO(data), as_attachment=True, download_name="thumbnail.jpg")
         files = [f for f in glob.glob(os.path.join(dl_dir, "*")) if not f.endswith((".part", ".ytdl", ".tmp"))]
@@ -417,13 +415,7 @@ def download():
         size_mb = os.path.getsize(path) / (1024 * 1024)
         if size_mb > MAX_WEB_MB:
             raise Exception(f"File is {size_mb:.1f} MB, over the {MAX_WEB_MB} MB web limit. Use the Telegram bot for larger files if your plan allows it.")
-        if u:
-            con = web_db()
-            from datetime import datetime as _dt
-            con.execute("INSERT INTO web_history(user_id,url,title,fmt,size_mb,created) VALUES(?,?,?,?,?,?)",
-                        (u["id"], url, info.get("title") or "", fmt, round(size_mb, 2), _dt.now().strftime("%Y-%m-%d %H:%M:%S")))
-            con.commit()
-            con.close()
+        # No DB entry for this download (see note above).
         name = f"{info.get('title') or 'download'}"[:80].strip() + os.path.splitext(path)[1]
         # Read into memory first: the cleanup hook deletes dl_dir, and
         # on serverless the file may be gone before the body is sent.
@@ -442,13 +434,7 @@ def download():
                     path = os.path.join(dl_dir, "pinterest-image.jpg")
                     with open(path, "wb") as f:
                         f.write(resp.content)
-                    if u:
-                        con = web_db()
-                        from datetime import datetime as _dt2
-                        con.execute("INSERT INTO web_history(user_id,url,title,fmt,size_mb,created) VALUES(?,?,?,?,?,?)",
-                                    (u["id"], url, "Pinterest image pin", "thumb", round(len(resp.content) / (1024 * 1024), 2), _dt2.now().strftime("%Y-%m-%d %H:%M:%S")))
-                        con.commit()
-                        con.close()
+                    # No DB entry for this download (see note above).
                     return send_file(path, as_attachment=True, download_name="pinterest-image.jpg")
                 except Exception:
                     pass
