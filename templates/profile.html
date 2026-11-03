@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Profile — {{ site_name }}{% endblock %}
+{% block content %}
+<div class="card glow-card fade-in">
+  <h2>Profile</h2>
+  {% if ok %}<div class="notice">{{ ok }}</div>{% endif %}
+  <p><b style="color:#fff">{{ user.username }}</b> <span class="badge {% if user.plan!='Free' %}gold{% endif %}">{{ user.plan }}</span>
+  {% if user.telegram %}<span class="badge">{{ user.telegram }}</span>{% endif %}</p>
+  <p class="small">Joined: {{ user.created }} · Coins: {{ user.coins }} · Web downloads: {{ user.web_downloads }}</p>
+  <p>Daily limit (web): {{ user.today }} / {{ user.daily_limit }}</p>
+  <div class="progress"><div style="width:{{ (100*user.today/user.daily_limit) if user.daily_limit else 0 }}%"></div></div>
+  <h3 style="margin-top:18px">Daily bonus &amp; redeem</h3>
+  <form method="post" action="/daily-bonus" style="display:inline"><button class="btn" type="submit">Claim daily bonus (+1 coin)</button></form>
+  <form method="post" action="/redeem" style="margin-top:10px">
+    <label class="form-label">Redeem code</label><input name="code" placeholder="e.g. WELCOME10">
+    <button class="btn" type="submit">Redeem</button>
+  </form>
+  <p class="small">Try code <b style="color:#fff">WELCOME10</b> once for +10 coins (demo code, one use per account). Telegram bot: <a href="https://t.me/{{ bot }}" target="_blank" rel="noopener">@{{ bot }}</a> — same download engine, bot plan is tracked separately in the bot.</p>
+  <h3 style="margin-top:18px">Favourites</h3>
+  {% if favs %}<ul class="small">{% for x in favs %}<li>{{ x.url }} — {{ x.created }}</li>{% endfor %}</ul>
+  {% else %}<p class="small">No favourites yet. Save a link from History after a download.</p>{% endif %}
+</div>
+{% endblock %}

@@ -1,7 +1,9 @@
 import os
 import secrets
+import shutil
 import string
 import time
+import uuid
 import logging
 import glob
 import csv
@@ -36,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATIONS ---
 BOT_TOKEN = os.getenv("BOT_TOKEN") 
-OWNER_ID = 8651895707  # Supreme Commander ID
+OWNER_ID = 7625443511  # Owner ID ending in 511, as chosen by the user (was 8651895707 in the repo)
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///aura_database.db")
 FORCE_CHANNELS = [] 
 
@@ -232,39 +234,151 @@ def get_platform_name(url):
     elif 'instagram.com' in url: return "Instagram 📸"
     elif 'twitter.com' in url or 'x.com' in url: return "X (Twitter) 🐦"
     elif 'linkedin.com' in url: return "LinkedIn 💼"
+    elif 'twitch.tv' in url: return "Twitch 🟣"
+    elif 'vimeo.com' in url: return "Vimeo 🔵"
+    elif 'dailymotion.com' in url or 'dai.ly' in url: return "Dailymotion ▶️"
+    elif 'reddit.com' in url: return "Reddit 🟠"
+    elif 'soundcloud.com' in url: return "SoundCloud ☁️"
+    elif 'pinterest.com' in url or 'pin.it' in url: return "Pinterest 📌"
+    elif 'snapchat.com' in url: return "Snapchat 👻"
+    elif 'tumblr.com' in url: return "Tumblr 🔷"
     return "Web 🌐"
 
+
+EXTRACTOR_NAMES = {
+    'youtube': 'YouTube 🔴', 'tiktok': 'TikTok 🎵', 'facebook': 'Facebook 📘',
+    'instagram': 'Instagram 📸', 'twitter': 'X (Twitter) 🐦', 'twitch': 'Twitch 🟣',
+    'vimeo': 'Vimeo 🔵', 'dailymotion': 'Dailymotion ▶️', 'reddit': 'Reddit 🟠',
+    'soundcloud': 'SoundCloud ☁️', 'pinterest': 'Pinterest 📌',
+    'snapchat': 'Snapchat 👻', 'tumblr': 'Tumblr 🔷', 'linkedin': 'LinkedIn 💼',
+}
+
+
+def fmt_mb(size_bytes):
+    if not size_bytes:
+        return None
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+def fmt_duration_text(seconds):
+    try:
+        seconds = int(seconds)
+        if seconds >= 3600:
+            return f"{seconds // 3600}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
+        return f"{seconds // 60}:{seconds % 60:02d}"
+    except Exception:
+        return None
+
+
+def get_link_info(url):
+    """Detect platform, title, duration and approx size via yt-dlp metadata.
+
+    Returns a dict or None if metadata could not be read (slow/private/etc).
+    This does not download the file. Size is approximate: yt-dlp reports the
+    selected format's size only after format selection, so filesize_approx
+    is shown as an estimate.
+    """
+    opts = {
+        'quiet': True, 'no_warnings': True, 'noplaylist': True,
+        'skip_download': True, 'socket_timeout': 60, 'retries': 3,
+        'nocheckcertificate': True,
+        'extractor_retries': 3,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        },
+    }
+    if os.path.exists("cookies.txt"):
+        opts['cookiefile'] = 'cookies.txt'
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:
+        logger.warning("Link info failed for %s: %s", url[:80], exc)
+        return None
+    if not info:
+        return None
+    extractor = (info.get('extractor') or info.get('extractor_key') or '').lower()
+    platform = EXTRACTOR_NAMES.get(extractor)
+    if not platform:
+        # Extractor keys like 'facebook:reel' -> 'facebook'
+        platform = EXTRACTOR_NAMES.get(extractor.split(':')[0], get_platform_name(url))
+    size = info.get('filesize') or info.get('filesize_approx')
+    return {
+        'platform': platform,
+        'title': info.get('title'),
+        'duration': fmt_duration_text(info.get('duration')),
+        'size_mb': fmt_mb(size),
+        'is_live': bool(info.get('is_live')),
+    }
+
 # --- UI MENUS ---
+# Popup helper: show_alert=True opens a popup on the user's screen.
+def popup(call, text):
+    try:
+        bot.answer_callback_query(call.id, text, show_alert=True)
+    except Exception:
+        pass
+
+
 def get_bottom_keyboard():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
-        KeyboardButton("👤 Matrix Profile"), 
-        KeyboardButton("💎 Elite Upgrades"),
-        KeyboardButton("🏆 AURA Leaderboard"), 
-        KeyboardButton("🎁 Network Invites"),
-        KeyboardButton("🔋 Restore Bandwidth"), 
-        KeyboardButton("ℹ️ System Logs")
+        KeyboardButton("👤 Profile"),
+        KeyboardButton("💎 Plans"),
+        KeyboardButton("🏆 Leaderboard"),
+        KeyboardButton("🎁 Invite"),
+        KeyboardButton("🔋 Daily Bonus"),
+        KeyboardButton("ℹ️ Help")
     )
     return markup
+
+
+# Old button labels still work for users with the old keyboard cached.
+BOTTOM_LABELS = {
+    "👤 Matrix Profile": "👤 Profile",
+    "💎 Elite Upgrades": "💎 Plans",
+    "🏆 AURA Leaderboard": "🏆 Leaderboard",
+    "🎁 Network Invites": "🎁 Invite",
+    "🔋 Restore Bandwidth": "🔋 Daily Bonus",
+    "ℹ️ System Logs": "ℹ️ Help",
+}
+
 
 def get_inline_menu(msg_id):
     markup = InlineKeyboardMarkup()
     markup.row(
-        InlineKeyboardButton("🎬 Video Protocol", callback_data=f"dl|vid|{msg_id}"),
-        InlineKeyboardButton("🎵 Audio Extractor", callback_data=f"dl|aud|{msg_id}")
+        InlineKeyboardButton("📥 Video", callback_data=f"dl|vid|{msg_id}"),
+        InlineKeyboardButton("🎵 Audio", callback_data=f"dl|aud|{msg_id}")
     )
     markup.row(
-        InlineKeyboardButton("🖼 Render Visuals", callback_data=f"dl|thumb|{msg_id}"),
-        InlineKeyboardButton("❌ Abort", callback_data="cancel")
+        InlineKeyboardButton("🖼️ Thumbnail", callback_data=f"dl|thumb|{msg_id}"),
+        InlineKeyboardButton("❌ Cancel", callback_data="cancel")
+    )
+    markup.row(
+        InlineKeyboardButton("ℹ️ How to use", callback_data="ui:howto")
     )
     return markup
 
+
+def get_start_inline_menu():
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("📥 How to download", callback_data="ui:howto"),
+        InlineKeyboardButton("👤 My Profile", callback_data="ui:profile")
+    )
+    markup.row(
+        InlineKeyboardButton("💎 Plans", callback_data="ui:plans"),
+        InlineKeyboardButton("ℹ️ Help", callback_data="ui:help")
+    )
+    return markup
+
+
 def loading_animation(chat_id, msg_id):
     stages = [
-        "💠 *Initializing AURA Synapse...*",
-        "🌀 *Bypassing server firewalls...*",
-        "⚡ *Extracting raw data packets...*",
-        "✅ *AURA Sync Successful!*"
+        "⏳ *Starting download...*",
+        "⬇️ *Downloading file...*",
+        "📤 *Preparing to send...*"
     ]
     for stage in stages:
         try:
@@ -305,29 +419,31 @@ def start_cmd(message):
     if user.role == 'owner':
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
-        flex_text = f"🌌 **WELCOME BACK, SUPREME COMMANDER** 🌌\n\n"
-        flex_text += f"The AURA Matrix acknowledges your presence, Master {message.from_user.first_name}. All systems are synchronized and awaiting your command.\n\n"
-        flex_text += f"🌐 **Active Citizens:** `{total_users}`\n"
-        flex_text += f"⚡ **Global Extractions:** `{total_bot_dls}`\n"
-        flex_text += f"🎛️ **Core Health:** CPU `{cpu}%` | RAM `{ram}%`\n\n"
-        flex_text += "Deploy your link parameters to initiate secure download overrides... 🔮"
+        flex_text = f"👋 **Welcome back, {message.from_user.first_name}!**\n\n"
+        flex_text += "Send any video link, then choose Video, Audio or Thumbnail.\n\n"
+        flex_text += f"👥 **Total users:** `{total_users}`\n"
+        flex_text += f"📥 **Total downloads:** `{total_bot_dls}`\n"
+        flex_text += f"🖥️ **Server:** CPU `{cpu}%` | RAM `{ram}%`\n"
         bot.send_message(message.chat.id, flex_text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown")
         return
 
-    # Normal user greeting
+    # Normal user greeting - clean, plain style
     role_text = f"`{user.role.upper()}`"
     usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
 
-    text = f"🚀 **Welcome to AURA NETWORK, {message.from_user.first_name}!**\n"
-    text += "Transmit any media url to execute high-speed extractions.\n\n"
-    text += f"🔰 **Clearance Level:** {role_text}\n"
-    text += f"📥 **Bandwidth Status:** `{usage_text}`\n"
-    text += f"🌐 **AURA Syndicate:** `{total_users} Connected Nodes`\n\n"
-    text += "🤖 **AI Access:** Send `/chat` to communicate with the DeepSeek Core.\n"
-    text += "💬 **Support:** Send `/feedback` to report anomalies directly to the Commander.\n\n"
-    text += f"👨‍💻 **Architect:** [Ononto Hasan](https://www.facebook.com/yours.ononto)"
+    text = f"👋 **Welcome, {message.from_user.first_name}!**\n\n"
+    text += "📥 Send any video link, then choose:\n"
+    text += "• **Video** - download the video\n"
+    text += "• **Audio** - download audio only\n"
+    text += "• **Thumbnail** - get the thumbnail image\n\n"
+    text += f"👤 **Plan:** {role_text}\n"
+    text += f"📊 **Today:** `{usage_text}` downloads used\n"
+    text += f"👥 **Total users:** `{total_users}`\n\n"
+    text += "🤖 Send `/chat` for AI chat.\n"
+    text += "💬 Send `/feedback <message>` for support."
 
-    bot.send_message(message.chat.id, text, reply_markup=get_bottom_keyboard(), parse_mode="Markdown", disable_web_page_preview=True)
+    bot.send_message(message.chat.id, text, reply_markup=get_start_inline_menu(), parse_mode="Markdown", disable_web_page_preview=True)
+    bot.send_message(message.chat.id, "Use the menu below:", reply_markup=get_bottom_keyboard())
 
 @bot.message_handler(commands=['feedback'])
 def feedback_cmd(message):
@@ -397,18 +513,19 @@ def lucky_spin_cmd(message):
     db.close()
     bot.send_message(message.chat.id, result, parse_mode="Markdown")
 
-@bot.message_handler(func=lambda m: m.text in ["👤 Matrix Profile", "💎 Elite Upgrades", "🏆 AURA Leaderboard", "🎁 Network Invites", "🔋 Restore Bandwidth", "ℹ️ System Logs"])
+@bot.message_handler(func=lambda m: m.text in list(BOTTOM_LABELS.keys()) + list(BOTTOM_LABELS.values()))
 def bottom_menu_handler(message):
     if MAINTENANCE and message.from_user.id != OWNER_ID:
         return
     db = SessionLocal()
     user = get_user(db, message.from_user.id, message.from_user.first_name)
-    
+
     if user.is_banned:
         db.close()
         return
-    
-    if message.text == "👤 Matrix Profile":
+
+    label = BOTTOM_LABELS.get(message.text, message.text)
+    if label == "👤 Profile":
         expiry = user.role_expires_at.strftime("%Y-%m-%d %H:%M") if user.role_expires_at else "Infinite"
         if user.role == 'owner':
             role_text = "🌌 👑 **SUPREME COMMANDER** 👑 🌌"
@@ -417,11 +534,11 @@ def bottom_menu_handler(message):
             role_text = f"`{user.role.upper()}`"
             usage_text = f"{user.daily_downloads} / {LIMITS[user.role]}"
 
-        text = f"👤 **AURA Node Profile**\n\n🆔 UUID: `{user.id}`\n👑 Clearance: {role_text}\n⏳ Decay: `{expiry}`\n📊 **Capacity:** `{usage_text}`\n📥 **Total Extracted:** `{user.total_downloads}`\n👥 **Synapse Invites:** `{user.referral_count}`\n\n🎰 *Exhausted? Run /spin*"
+        text = f"👤 **Your Profile**\n\n🆔 **ID:** `{user.id}`\n👤 **Plan:** {role_text}\n⏳ **Expires:** `{expiry}`\n📊 **Today:** `{usage_text}`\n📥 **Total downloads:** `{user.total_downloads}`\n👥 **Invites:** `{user.referral_count}`\n\n🎰 *Out of downloads? Try /spin*"
         bot.reply_to(message, text, parse_mode="Markdown")
         
-    elif message.text == "💎 Elite Upgrades":
-        text = "💎 **AURA MATRIX UPGRADES** 💎\n\n"
+    elif label == "💎 Plans":
+        text = "💎 **Plans** 💎\n\n"
         for role, price in PRICING.items():
             limit_str = "2GB Size Limit" if role in ['heroic', 'master', 'membership'] else "50MB Size Limit"
             text += f"🔹 **{role.capitalize()}** ({LIMITS[role]} DLs/Day | {limit_str}) ➡️ **{price}**\n"
@@ -430,20 +547,20 @@ def bottom_menu_handler(message):
         markup = InlineKeyboardMarkup().add(InlineKeyboardButton("✅ Verify Ledger", callback_data="verify_payment"))
         bot.reply_to(message, text, reply_markup=markup, parse_mode="Markdown")
             
-    elif message.text == "🏆 AURA Leaderboard":
+    elif label == "🏆 Leaderboard":
         top = db.query(User).order_by(User.total_downloads.desc()).limit(5).all()
-        text = "🏆 **AURA Elite Protocol**\n\n"
+        text = "🏆 **Leaderboard**\n\n"
         for i, u in enumerate(top): 
             r_str = "COMMANDER" if u.role == 'owner' else u.role.upper()
             text += f"{i+1}. {u.name} (`{u.id}`) - **{r_str}** - 📥 {u.total_downloads}\n"
         bot.reply_to(message, text, parse_mode="Markdown")
         
-    elif message.text == "🎁 Network Invites":
+    elif label == "🎁 Invite":
         bot_username = bot.get_me().username
-        text = f"🎁 **Expand the Matrix!**\nReceive +2 capacity for every active node you bring online.\n\n🔗 Transmission Link: `https://t.me/{bot_username}?start=ref_{user.id}`"
+        text = f"🎁 **Invite friends**\nGet +2 downloads for every friend who joins with your link.\n\n🔗 Invite link: `https://t.me/{bot_username}?start=ref_{user.id}`"
         bot.reply_to(message, text, parse_mode="Markdown")
 
-    elif message.text == "🔋 Restore Bandwidth":
+    elif label == "🔋 Daily Bonus":
         if user.daily_downloads < LIMITS[user.role] and user.role != 'owner':
             bot.reply_to(message, f"⚠️ **Buffer not empty!**\nClaim protocol is locked until your daily limit ({LIMITS[user.role]}) is completely utilized.", parse_mode="Markdown")
         elif user.last_daily_claim and user.last_daily_claim.date() == datetime.now().date():
@@ -454,8 +571,8 @@ def bottom_menu_handler(message):
             db.commit()
             bot.reply_to(message, "🎉 **+2 Capacity Restored!**\nUse it wisely.", parse_mode="Markdown")
 
-    elif message.text == "ℹ️ System Logs":
-        text = "🛠 **AURA Directives:**\n- `/redeem CODE` - Inject rank code.\n- `/spin` - Quantum probability matrix.\n- `/settings` - Adjust UI.\n- `/chat` - DeepSeek AI Interface.\n- `/feedback Msg` - Ping the Commander.\n- Standard nodes: 5 DL/Day.\n- Max 50MB per file (2GB for Heroic+)."
+    elif label == "ℹ️ Help":
+        text = "ℹ️ **Help**\n- Send a video link, then choose Video / Audio / Thumbnail.\n- `/redeem CODE` - Redeem a plan code.\n- `/spin` - Try your luck for bonus downloads.\n- `/settings` - Change settings.\n- `/chat` - AI chat.\n- `/feedback <message>` - Contact support.\n- Free plan: 5 downloads/day, max 50MB per file (2GB for Heroic+)."
         bot.reply_to(message, text, parse_mode="Markdown")
         
     db.close()
@@ -481,11 +598,49 @@ def toggle_auto_delete(call):
     
     status = "ON 🟢" if user.auto_delete else "OFF 🔴"
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"Auto-Wipe Trace: {status}", callback_data=f"set_autodel|{user.id}"))
-    
+    markup.add(InlineKeyboardButton(f"Auto-delete original message: {status}", callback_data=f"set_autodel|{user.id}"))
+
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
-    bot.answer_callback_query(call.id, f"Auto-Wipe engaged to {status.split()[0]}")
+    popup(call, f"Auto-delete is now {status.split()[0]}.")
     db.close()
+
+# --- COOKIES (for login-required videos the owner can access) ---
+# cookies.txt is read by yt-dlp automatically if it exists in this folder.
+# It must be the owner's own browser cookies, exported as Netscape format.
+# Cookies are a login session: never share them publicly, and log out /
+# change your password if they ever leak.
+@bot.message_handler(commands=['cookies'])
+def cookies_cmd(message):
+    if message.from_user.id != OWNER_ID:
+        return bot.reply_to(message, "Owner only.")
+    bot.reply_to(
+        message,
+        "🍪 **Cookies - for login-required videos**\n\n"
+        "1. In your browser, open the site (Facebook / Instagram / YouTube) and log in with your own account.\n"
+        "2. Export cookies with a browser extension like 'Get cookies.txt LOCALLY' as Netscape format.\n"
+        "3. Send that `cookies.txt` file to this bot (owner only).\n"
+        "4. Then send the video link again - videos you can already watch while logged in may now download.\n\n"
+        "⚠️ This does NOT unlock other people's private videos, and it does NOT bypass DRM. "
+        "It only lets the bot use your own logged-in access. If cookies leak, log out everywhere / change your password.",
+        parse_mode="Markdown",
+    )
+
+
+@bot.message_handler(content_types=['document'])
+def cookies_upload(message):
+    if message.from_user.id != OWNER_ID:
+        return
+    if not message.document or message.document.file_name != 'cookies.txt':
+        return
+    try:
+        file_info = bot.get_file(message.document.file_id)
+        data = bot.download_file(file_info.file_path)
+        with open('cookies.txt', 'wb') as f:
+            f.write(data)
+        bot.reply_to(message, "✅ cookies.txt saved. Send the login-required link again to try it.")
+    except Exception as exc:
+        bot.reply_to(message, f"❌ Could not save cookies.txt: {exc}")
+
 
 # --- PAYMENT VERIFICATION SYSTEM ---
 @bot.callback_query_handler(func=lambda call: call.data == 'verify_payment')
@@ -957,156 +1112,329 @@ def handle_link(message):
     bot.send_chat_action(message.chat.id, 'typing')
     url = clean_url(message.text.strip())
     msg_id = message.message_id
-    url_storage[msg_id] = url
-    
-    platform = get_platform_name(url)
-    
+
+    # Detect platform/title/duration/size for any yt-dlp-supported site.
+    # If this check fails (slow/private/login), fall back to URL-based
+    # detection and let the format button try - nothing is blocked here.
+    status_msg = bot.reply_to(message, "🔍 Detecting platform and file info...", parse_mode="Markdown")
+    info = get_link_info(url)
+    # Store who sent it, the url, and the detected info for reuse on download.
+    url_storage[msg_id] = (user_id, url, info)
+
+    if info:
+        platform = info['platform']
+        detail_lines = []
+        if info.get('title'):
+            detail_lines.append(f"🎬 **Title:** {info['title'][:200]}")
+        if info.get('duration'):
+            detail_lines.append(f"⏱ **Duration:** `{info['duration']}`")
+        if info.get('size_mb'):
+            detail_lines.append(f"📦 **Approx size:** `{info['size_mb']}` (estimate)")
+        elif info.get('is_live'):
+            detail_lines.append("📡 **Live stream** - size is not known in advance.")
+        else:
+            detail_lines.append("📦 **Size:** `Unknown - will be checked on download`")
+        details = "\n".join(detail_lines)
+    else:
+        platform = get_platform_name(url)
+        details = "⚠️ Title/size could not be checked (link may be slow, private, or login-required).\nTap a format to try anyway."
+
     # Calculate Display limit dynamically based on role
-    limit_str = "2GB Raw Extraction" if user.role in ['heroic', 'master', 'membership', 'owner'] else "50MB Compressed"
-    
+    limit_str = "2GB max file" if user.role in ['heroic', 'master', 'membership', 'owner'] else "50MB max file"
+
     text = (
-        f"🔗 *Vector Lock Confirmed!*\n\n"
-        f"📡 **Origin:** `{platform}`\n"
-        f"📦 **Capacity:** `{limit_str}`\n\n"
-        f"👇 *Define your protocol parameters:*"
+        f"🔗 **Link received!**\n\n"
+        f"📡 **Platform:** {platform}\n"
+        f"{details}\n"
+        f"📦 **Your limit:** `{limit_str}`\n"
+        f"📊 **Today:** `{user.daily_downloads} / {LIMITS[user.role]}`\n\n"
+        f"👇 *Choose a format:*"
     )
-    bot.reply_to(message, text, reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
+    bot.edit_message_text(text, message.chat.id, status_msg.message_id, reply_markup=get_inline_menu(msg_id), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
 def cancel_action(call):
+    popup(call, "Cancelled.")
     bot.delete_message(call.message.chat.id, call.message.message_id)
+
+
+HOWTO_TEXT = (
+    "📥 **How to download**\n\n"
+    "1. Send a video link (YouTube, TikTok, Instagram, Facebook, X).\n"
+    "2. Tap **Video**, **Audio** or **Thumbnail**.\n"
+    "3. Wait for the download - you will see the progress %.\n\n"
+    "Free plan: 5 downloads/day, max 50MB per file."
+)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('ui:'))
+def ui_popup_handler(call):
+    action = call.data.split(':', 1)[1]
+    if action == 'howto':
+        popup(call, "Send a link, then tap Video, Audio or Thumbnail.")
+        bot.send_message(call.message.chat.id, HOWTO_TEXT, parse_mode="Markdown")
+    elif action == 'help':
+        popup(call, "Help: send a link, then choose a format.")
+        bot.send_message(
+            call.message.chat.id,
+            "ℹ️ **Help**\n- Send a video link, then choose Video / Audio / Thumbnail.\n"
+            "- `/redeem CODE` - Redeem a plan code.\n- `/spin` - Bonus downloads.\n- `/settings` - Change settings.",
+            parse_mode="Markdown",
+        )
+    elif action == 'profile':
+        popup(call, "Opening your profile...")
+        db = SessionLocal()
+        user = get_user(db, call.from_user.id, call.from_user.first_name)
+        db.close()
+        bot.send_message(
+            call.message.chat.id,
+            f"👤 **Your Profile**\n\n🆔 **ID:** `{user.id}`\n👤 **Plan:** `{user.role.upper()}`\n"
+            f"📊 **Today:** `{user.daily_downloads} / {LIMITS[user.role]}`\n📥 **Total downloads:** `{user.total_downloads}`",
+            parse_mode="Markdown",
+        )
+    elif action == 'plans':
+        popup(call, "Plans: choose one to upgrade.")
+        text = "💎 **Plans**\n\n"
+        for role, price in PRICING.items():
+            limit_str = "2GB Size Limit" if role in ['heroic', 'master', 'membership'] else "50MB Size Limit"
+            text += f"🔹 **{role.capitalize()}** ({LIMITS[role]} / day | {limit_str}) - **{price}**\n"
+        bot.send_message(call.message.chat.id, text, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('dl|'))
 def process_dl(call):
     parts = call.data.split('|')
     dl_type = parts[1]
     msg_id = int(parts[2])
-    url = url_storage.get(msg_id)
-    
-    if not url:
-        return bot.answer_callback_query(call.id, "❌ Session cache dropped!", show_alert=True)
+    stored = url_storage.get(msg_id)
+
+    if not stored:
+        return popup(call, "This link expired. Send the link again.")
+
+    # url_storage holds (user_id, url, info); accept older (user_id, url) too.
+    if isinstance(stored, tuple) and len(stored) == 3:
+        owner_id, url, cached_info = stored
+    elif isinstance(stored, tuple):
+        owner_id, url, cached_info = stored[0], stored[1], None
+    else:
+        owner_id, url, cached_info = call.from_user.id, stored, None
+    if call.from_user.id != owner_id:
+        return popup(call, "This download belongs to another user.")
 
     db = SessionLocal()
     user = get_user(db, call.from_user.id, call.from_user.first_name)
-    
+
     if user.role != 'owner' and user.daily_downloads >= LIMITS[user.role]:
         db.close()
-        return bot.answer_callback_query(call.id, "❌ Extraction Limit Met! Expand your rank.", show_alert=True)
+        return popup(call, "Daily limit reached. Upgrade your plan for more downloads.")
 
-    msg = bot.edit_message_text("⏳ Syncing binary...", call.message.chat.id, call.message.message_id)
-    
-    loading_animation(call.message.chat.id, msg.message_id)
+    popup(call, "Downloading... please wait.")
+    msg = bot.edit_message_text("⏳ Starting download...", call.message.chat.id, call.message.message_id)
 
-    if user.role != 'owner': 
+    if user.role != 'owner':
         user.daily_downloads += 1
     user.total_downloads += 1
     db.commit()
 
-    # ---- FIX 1: Clean old files for this user before downloading ----
-    old_files = glob.glob(f'downloads/*_{user.id}.*')
-    for f in old_files:
-        try: os.remove(f)
-        except: pass
+    # One folder per download: no old-file cleanup, no picking another user's file.
+    dl_dir = os.path.join('downloads', f"dl_{user.id}_{uuid.uuid4().hex[:8]}")
+    os.makedirs(dl_dir, exist_ok=True)
+    is_premium = user.role in ['heroic', 'master', 'membership', 'owner']
+    max_allowed_size = 1950.0 if is_premium else 49.5
 
-    # ---- FIX 2: Optimized yt-dlp config ----
+    def fmt_duration(seconds):
+        try:
+            seconds = int(seconds)
+            return f"{seconds // 60}:{seconds % 60:02d}"
+        except Exception:
+            return None
+
+    def progress_hook(d):
+        # Throttled progress updates so Telegram is not flooded with edits.
+        if d.get('status') != 'downloading':
+            return
+        now = time.time()
+        if now - progress_hook.last < 5:
+            return
+        progress_hook.last = now
+        downloaded = d.get('downloaded_bytes') or 0
+        total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+        pct = f"{downloaded * 100 / total:.0f}%" if total else ""
+        speed = d.get('speed')
+        speed_txt = f" - {speed / 1024 / 1024:.1f} MB/s" if speed else ""
+        try:
+            bot.edit_message_text(
+                f"⬇️ Downloading... {pct}{speed_txt}",
+                call.message.chat.id, msg.message_id,
+            )
+        except Exception:
+            pass
+    progress_hook.last = 0
+
     ydl_opts = {
-        'outtmpl': f'downloads/%(id)s_{user.id}.%(ext)s',
+        'outtmpl': os.path.join(dl_dir, '%(id)s.%(ext)s'),
         'quiet': True,
         'nocheckcertificate': True,
         'no_warnings': True,
-        'ignoreerrors': False, 
+        'ignoreerrors': False,
         'noplaylist': True,
-        # Better fallback without FFMPEG
-        'format': 'best[ext=mp4]/best' if dl_type == 'vid' else 'bestaudio/best',
+        'socket_timeout': 120,
+        'retries': 10,
+        'fragment_retries': 10,
+        'extractor_retries': 5,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        },
+        'progress_hooks': [progress_hook],
+        # Video must merge video+audio: sites like Pinterest only offer
+        # separate video-only and audio-only HLS formats, so a plain
+        # 'best' selector fails with "Requested format is not available".
+        'format': (
+            'bestvideo[ext=mp4]+bestaudio/bestvideo+bestaudio/best' if is_premium
+            else 'bestvideo[height<=720][ext=mp4]+bestaudio/bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best'
+        ) if dl_type == 'vid' else 'bestaudio/best',
+        'merge_output_format': 'mp4' if dl_type == 'vid' else None,
     }
-    
+    if dl_type == 'aud' and shutil.which('ffmpeg'):
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
+
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = 'cookies.txt'
 
-    if dl_type == 'thumb': 
+    if dl_type == 'thumb':
         ydl_opts['skip_download'] = True
         ydl_opts['writethumbnail'] = True
 
     try:
-        bot.edit_message_text("🚀 **Data packet incoming to Telegram...**\nHold your interface.", call.message.chat.id, msg.message_id, parse_mode="Markdown")
-        
+        # Reuse the info detected when the link was sent, if available.
+        # Otherwise check size/title first, so a huge free-plan file is
+        # not fully downloaded. Facebook pages sometimes time out once -
+        # retry the metadata read once.
+        info = None
+        if cached_info and dl_type != 'thumb':
+            info = {
+                'title': cached_info.get('title'),
+                'duration': None,
+            }
+            # Duration was stored as text; keep it for the caption below.
+            cached_duration_txt = cached_info.get('duration')
+        else:
+            cached_duration_txt = None
+        if not info or not cached_info:
+            last_meta_error = None
+            for attempt in range(2):
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=False)
+                    break
+                except Exception as exc:
+                    last_meta_error = exc
+                    if attempt == 0 and 'timed out' in str(exc).lower():
+                        bot.edit_message_text("⏳ Site is slow, retrying...", call.message.chat.id, msg.message_id)
+                        time.sleep(5)
+                        continue
+                    raise
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            
             if not info:
-                raise Exception("Encryption detected. Cannot bypass file restrictions.")
+                raise Exception("Could not read this link.")
+            size_mb = None
+            raw_size = info.get('filesize') or info.get('filesize_approx')
+            if raw_size:
+                size_mb = raw_size / (1024 * 1024)
+            elif cached_info and cached_info.get('size_mb'):
+                try:
+                    size_mb = float(str(cached_info['size_mb']).split()[0])
+                except Exception:
+                    size_mb = None
+            if dl_type != 'thumb' and size_mb and size_mb > max_allowed_size and not USE_LOCAL_SERVER:
+                raise Exception(f"File is about {size_mb:.0f}MB, over your {max_allowed_size:.0f}MB limit.")
+            title = info.get('title') or 'Download'
+            duration_txt = fmt_duration(info.get('duration')) or cached_duration_txt
 
             if dl_type == 'thumb':
                 thumb_url = info.get('thumbnail')
                 if thumb_url:
-                    bot.send_photo(call.message.chat.id, thumb_url, caption="🖼 **AURA Rendering complete**", parse_mode="Markdown")
+                    bot.send_photo(call.message.chat.id, thumb_url, caption=f"🖼️ {title[:200]}", parse_mode="Markdown")
+                else:
+                    raise Exception("No thumbnail found for this link.")
                 bot.delete_message(call.message.chat.id, msg.message_id)
                 return
 
-            # ---- FIX 3: Robust file locating ----
-            downloaded_files = glob.glob(f'downloads/*_{user.id}.*')
-            valid_files = [f for f in downloaded_files if not f.endswith('.part') and not f.endswith('.ytdl')]
-            
-            if not valid_files:
-                raise Exception("Extraction failed. File might be protected or requires cookies.")
-            path = valid_files[0]
+            bot.edit_message_text("⬇️ Downloading file...", call.message.chat.id, msg.message_id)
+            try:
+                info = ydl.extract_info(url, download=True)
+            except Exception as dl_exc:
+                # Last-resort fallback if a site offers no format matching
+                # the selector above: try the plain merged best format.
+                if 'Requested format is not available' not in str(dl_exc):
+                    raise
+                ydl_opts['format'] = 'bestvideo+bestaudio/best'
+                ydl_opts.pop('merge_output_format', None)
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl2:
+                    info = ydl2.extract_info(url, download=True)
+            if not info:
+                raise Exception("Could not download this link. It may be private or need login.")
 
-            if os.path.exists(path):
-                file_size = os.path.getsize(path) / (1024 * 1024)
-                
-                # Adjust limits dynamically
-                if user.role in ['heroic', 'master', 'membership', 'owner']:
-                    max_allowed_size = 1950.0
+            files = [
+                f for f in glob.glob(os.path.join(dl_dir, '*'))
+                if not f.endswith(('.part', '.ytdl', '.tmp'))
+            ]
+            if dl_type == 'vid':
+                files = [f for f in files if f.lower().endswith(('.mp4', '.mkv', '.webm', '.mov'))] or files
+            else:
+                files = [f for f in files if f.lower().endswith(('.mp3', '.m4a', '.ogg', '.opus', '.webm'))] or files
+            files = [f for f in files if not f.lower().endswith(('.jpg', '.png', '.webp'))]
+            if not files:
+                raise Exception("Download failed. The file may be protected or need login.")
+            path = max(files, key=os.path.getsize)
+            file_size = os.path.getsize(path) / (1024 * 1024)
+            if file_size > max_allowed_size and not USE_LOCAL_SERVER:
+                raise Exception(f"File is {file_size:.1f}MB, over your {max_allowed_size:.0f}MB limit.")
+
+            caption = f"✅ {title[:200]}"
+            if duration_txt:
+                caption += f"\n⏱ {duration_txt}"
+            caption += f"\n📦 {file_size:.1f} MB"
+            bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
+            with open(path, 'rb') as file:
+                if dl_type == 'aud':
+                    bot.send_audio(call.message.chat.id, file, title=title[:200], caption=caption)
                 else:
-                    max_allowed_size = 49.5
-                
-                if file_size > max_allowed_size and not USE_LOCAL_SERVER:
-                    os.remove(path)
-                    raise Exception(f"Mass exceeds clearance limits ({round(file_size, 1)}MB). Permitted mass: {max_allowed_size}MB.")
-
-                bot.send_chat_action(call.message.chat.id, 'upload_video' if dl_type == 'vid' else 'upload_document')
-                
-                with open(path, 'rb') as file:
-                    if dl_type == 'aud': 
-                        bot.send_audio(call.message.chat.id, file, title=info.get('title', 'AURA Audio Extraction'), caption="⚡ **AURA CORE**")
-                    else: 
-                        bot.send_video(call.message.chat.id, file, caption="⚡ **AURA EXTRACTOR**", supports_streaming=True)
-                
+                    bot.send_video(call.message.chat.id, file, caption=caption, supports_streaming=True)
+            bot.delete_message(call.message.chat.id, msg.message_id)
+            if user.auto_delete:
                 try:
-                    os.remove(path)
-                except:
+                    bot.delete_message(call.message.chat.id, msg_id)
+                except Exception:
                     pass
-                
-                bot.delete_message(call.message.chat.id, msg.message_id)
-                
-                if user.auto_delete:
-                    try:
-                        bot.delete_message(call.message.chat.id, msg_id)
-                    except:
-                        pass
-                
+
     except Exception as e:
         logger.error(f"Execution Error: {traceback.format_exc()}")
-        
         if user.role != 'owner' and user.daily_downloads > 0:
             user.daily_downloads -= 1
         user.total_downloads -= 1
         db.commit()
-        
-        error_msg = f"❌ **System Error:** {str(e)}"
-        
-        if "exceeds clearance limits" in str(e):
-            error_msg = f"❌ {str(e)}\n\nUpgrade your AURA clearance for unrestricted access."
-        elif "Private video" in str(e) or "Status code 403" in str(e) or "login" in str(e).lower() or "ffmpeg is not installed" in str(e).lower() or "registered users" in str(e):
-            error_msg = "❌ Target data is shielded (Private/Requires specific server keys)."
-            
+        msg_text = str(e)
+        if "timed out" in msg_text.lower() or "timeout" in msg_text.lower():
+            msg_text = "Facebook took too long to respond (timeout). Try the link again in a bit - this is usually Facebook being slow, not your limit. If the video is private, it will need login/cookies."
+        elif "Requested format is not available" in msg_text:
+            msg_text = "No downloadable video format was found for this link. It may be an image pin, a slideshow, or a format this site does not offer as video - try Thumbnail instead."
+        elif "Private video" in msg_text or "403" in msg_text or "login" in msg_text.lower() or "ffmpeg is not installed" in msg_text.lower():
+            msg_text = ("This link is private, restricted, or needs login, so it could not be downloaded. "
+                        "If you can watch it while logged in, the owner can send /cookies and upload their own cookies.txt, then try again.")
+        error_msg = f"❌ **Download failed:** {msg_text}\n\nYour download was refunded."
         try:
-            bot.edit_message_text(f"{error_msg}\n\nCapacity refunded.", call.message.chat.id, msg.message_id)
-        except:
+            bot.edit_message_text(error_msg, call.message.chat.id, msg.message_id, parse_mode="Markdown")
+        except Exception:
             pass
-            
     finally:
         db.close()
+        shutil.rmtree(dl_dir, ignore_errors=True)
         if msg_id in url_storage:
             del url_storage[msg_id]
 

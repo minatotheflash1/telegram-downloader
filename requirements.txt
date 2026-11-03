@@ -4,3 +4,6 @@ psycopg2-binary
 yt-dlp
 apscheduler
 psutil
+openai
+requests
+flask

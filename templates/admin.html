@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Admin — {{ site_name }}{% endblock %}
+{% block content %}
+<div class="card glow-card fade-in">
+  <h2>Admin dashboard</h2>
+  <div class="stats">
+    <div class="stat"><b>{{ stats.web_users }}</b><span>Web users</span></div>
+    <div class="stat"><b>{{ stats.bot_users }}</b><span>Telegram bot users</span></div>
+    <div class="stat"><b>{{ stats.web_downloads }}</b><span>Web downloads</span></div>
+  </div>
+  <h3 style="margin-top:18px">Web users</h3>
+  <table class="table"><tr><th>Username</th><th>Plan</th><th>Coins</th><th>Joined</th></tr>
+  {% for u in users %}<tr><td>{{ u.username }}</td><td>{{ u.plan }}</td><td>{{ u.coins }}</td><td>{{ u.created }}</td></tr>{% endfor %}
+  </table>
+  <p class="small">First registered web account becomes admin. Admin here is for the website only — Telegram bot admin is still the bot owner (OWNER_ID in main.py).</p>
+</div>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+    <div class="hero fade-in">
+      <h1>Download any video.<br><span class="grad glow-text">In one place.</span></h1>
+      <p>Paste a link, check what is actually available for that video, then download only what exists. No account needed for a web download — login to save history, favourites and your daily limit.</p>
+    </div>
+
+    <div class="card glow-card fade-in">
+      <h2><svg class="h-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download from the web</h2>
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+      {% if ok %}<div class="notice">{{ ok }}</div>{% endif %}
+      <form method="post" action="/download" id="dlform">
+        <input id="url" name="url" type="url" placeholder="Paste a video link here…  e.g. https://www.youtube.com/watch?v=…" value="{{ prefill_url or '' }}" required>
+        <button class="btn" type="button" id="checkbtn" style="margin-bottom:8px"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="m11 8 3 3-3 3"/></svg> Check available quality &amp; format</button>
+        <p class="small" id="checkmsg">First check the link — quality and format options will appear only if they are actually available for that video. Nothing unavailable will be shown.</p>
+        <div id="fmtwrap" class="hidden">
+          <label class="form-label" for="quality">Quality (video only)</label>
+          <select id="quality" name="quality"></select>
+          <label class="form-label" for="fmt">Format / Converter</label>
+          <select id="fmt" name="fmt"></select>
+        </div>
+        <button class="btn wide glow-btn" type="submit" id="dlbtn" disabled>Download now</button>
+      </form>
+      <p>Web limit: <b style="color:#fff">{{ max_mb }} MB</b> per file. Files are deleted from this server after download. Private / login-required videos need the bot owner's cookies — use the Telegram bot with <b style="color:#fff">/cookies</b> in that case.</p>
+      <div class="stats">
+        <div class="stat"><b>{{ users }}</b><span>Telegram users</span></div>
+        <div class="stat"><b>{{ downloads }}</b><span>Bot downloads</span></div>
+        <div class="stat"><b>{{ max_mb }} MB</b><span>Web file limit</span></div>
+      </div>
+    </div>
+
+    <div class="card glow-card fade-in">
+      <h2><svg class="h-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg> Prefer Telegram?</h2>
+      <p>Open the bot, send any link, and tap Video / Audio / Thumbnail. Your daily limit and plan are tracked in the bot.</p>
+      <a class="btn tg glow-btn" href="https://t.me/{{ bot }}" target="_blank" rel="noopener"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg> Open @{{ bot }} in Telegram</a>
+      <div class="chips">
+        <span class="chip">YouTube</span><span class="chip">TikTok</span><span class="chip">Facebook</span>
+        <span class="chip">Instagram</span><span class="chip">X / Twitter</span><span class="chip">Twitch</span>
+        <span class="chip">Vimeo</span><span class="chip">Dailymotion</span><span class="chip">Reddit</span>
+        <span class="chip">SoundCloud</span><span class="chip">Pinterest</span><span class="chip">+ 1000 more</span>
+      </div>
+    </div>
+
+    <div class="card glow-card fade-in">
+      <h2>How it works</h2>
+      <div class="grid">
+        <div class="feat"><h3>1. Paste</h3><p>Copy any supported video link.</p></div>
+        <div class="feat"><h3>2. Check</h3><p>See only the qualities and formats that actually exist for that video.</p></div>
+        <div class="feat"><h3>3. Download</h3><p>Choose video, audio converter or thumbnail, and get the file.</p></div>
+      </div>
+      <h3 style="margin-top:18px">FAQ</h3>
+      <p class="small"><b style="color:#fff">Private video?</b> Only videos the bot owner can already watch while logged in can be downloaded with /cookies. Other people's private videos and DRM content cannot be downloaded.<br>
+      <b style="color:#fff">File too big?</b> Web limit is {{ max_mb }} MB. Bigger files: use the Telegram bot, which has its own plan limits.<br>
+      <b style="color:#fff">No quality shown?</b> That video offers no separate video stream (for example an image post) — try Thumbnail, or Audio if an audio track exists.</p>
+    </div>
+  <script>
+    const checkbtn=document.getElementById('checkbtn'),urlEl=document.getElementById('url'),
+      msg=document.getElementById('checkmsg'),wrap=document.getElementById('fmtwrap'),
+      q=document.getElementById('quality'),f=document.getElementById('fmt'),dl=document.getElementById('dlbtn');
+    checkbtn.onclick=async()=>{
+      const url=urlEl.value.trim(); if(!url){msg.textContent='Please paste a link first.';return;}
+      msg.textContent='Checking what is available for this video…'; checkbtn.disabled=true;
+      try{
+        const r=await fetch('/api/formats',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+        const d=await r.json();
+        if(d.error){msg.textContent=d.error;wrap.classList.add('hidden');dl.disabled=true;return;}
+        q.innerHTML=''; f.innerHTML='';
+        if(d.qualities.length){d.qualities.forEach(x=>{const o=document.createElement('option');o.value=x;o.textContent=x+'p';q.appendChild(o);});}
+        else{const o=document.createElement('option');o.value='best';o.textContent='No separate video quality — use Thumbnail / Audio';q.appendChild(o);}
+        d.formats.forEach(x=>{const o=document.createElement('option');o.value=x.value;o.textContent=x.label;f.appendChild(o);});
+        wrap.classList.remove('hidden'); dl.disabled=false;
+        msg.textContent=(d.title?d.title+' — ':'')+'Available only: '+(d.qualities.length?d.qualities.join('p, ')+'p':'no video')+'. Unavailable options are hidden.';
+      }catch(e){msg.textContent='Could not check this link. Try again, or use the Telegram bot.';}
+      checkbtn.disabled=false;
+    };
+  </script>
+{% endblock %}

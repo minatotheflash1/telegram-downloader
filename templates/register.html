@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Register — {{ site_name }}{% endblock %}
+{% block content %}
+<div class="card glow-card auth-card fade-in">
+  <h2>Create account</h2>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="post">
+    <label class="form-label">Username</label><input name="username" required>
+    <label class="form-label">Telegram username (optional, for linking)</label><input name="telegram" placeholder="@username">
+    <label class="form-label">Password</label><input name="password" type="password" required>
+    <button class="btn wide glow-btn" type="submit">Register</button>
+  </form>
+  <p class="small">Already have an account? <a href="/login">Login</a>. Passwords are stored only as a hash, never in plain text.</p>
+</div>
+{% endblock %}

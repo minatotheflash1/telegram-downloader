@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}History — {{ site_name }}{% endblock %}
+{% block content %}
+<div class="card glow-card fade-in">
+  <h2>Download history</h2>
+  {% if rows %}
+  <table class="table"><tr><th>When</th><th>Title / URL</th><th>Format</th><th>Size</th><th>Actions</th></tr>
+  {% for r in rows %}<tr><td>{{ r.created }}</td><td>{{ r.title or r.url }}</td><td>{{ r.fmt }}</td><td>{{ r.size_mb }} MB</td><td><a class="btn small-btn" href="/?url={{ r.url }}">Download again</a> {% if user %}<form method="post" action="/favourite" style="display:inline"><input type="hidden" name="url" value="{{ r.url }}"><button class="btn small-btn" type="submit">Save</button></form>{% endif %}</td></tr>{% endfor %}
+  </table>
+  {% else %}<p class="small">No downloads yet. Go to <a href="/">Download</a> and check a link first.</p>{% endif %}
+  <p class="small">Login to keep your own history. Without login, downloads still work but are not saved to an account.</p>
+</div>
+{% endblock %}

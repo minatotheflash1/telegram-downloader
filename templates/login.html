@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Login — {{ site_name }}{% endblock %}
+{% block content %}
+<div class="card glow-card auth-card fade-in">
+  <h2>Login</h2>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="post">
+    <label class="form-label">Username</label><input name="username" required>
+    <label class="form-label">Password</label><input name="password" type="password" required>
+    <button class="btn wide glow-btn" type="submit">Login</button>
+  </form>
+  <p class="small">No account? <a href="/register">Register here</a>. You can also use the Telegram bot without a website account: <a href="https://t.me/{{ bot }}" target="_blank" rel="noopener">@{{ bot }}</a></p>
+</div>
+{% endblock %}

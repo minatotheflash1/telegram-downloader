@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Plans — {{ site_name }}{% endblock %}
+{% block content %}
+<div class="card glow-card fade-in">
+  <h2>Plans</h2>
+  <table class="table"><tr><th>Plan</th><th>Web daily limit</th><th>Notes</th></tr>
+  <tr><td>Free</td><td>5 / day</td><td>Video up to 720p, MP3, thumbnail</td></tr>
+  <tr><td>Bronze</td><td>20 / day</td><td>Same formats, higher limit (bot plan, ask admin)</td></tr>
+  <tr><td>Premium</td><td>Unlimited web*</td><td>Best quality, priority — *fair use, ask admin to enable</td></tr>
+  </table>
+  <p class="small">Payment (bKash / Nagad / card) is not connected yet — plan upgrades are currently done by the admin in the Telegram bot. This page shows the plan structure so a payment step can be added later without changing the download flow.</p>
+  {% if user %}<p>Your plan: <span class="badge">{{ user.plan }}</span> · Coins: {{ user.coins }}</p>{% endif %}
+  <a class="btn tg glow-btn" href="https://t.me/{{ bot }}" target="_blank" rel="noopener">Ask in Telegram @{{ bot }}</a>
+</div>
+{% endblock %}
